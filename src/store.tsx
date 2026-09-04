@@ -305,7 +305,7 @@ function useStore() {
       setDocuments((d) => [...added, ...d]);
       if (added[0]) setSelectedId(added[0].id);
       setUploadOpen(false);
-      navigate("Playground");
+      navigate(page === "Configuration" ? "Configuration" : "Playground");
       setMessage(
         mode === "demo"
           ? "Files opened locally for this session. Connect the local API to extract your own documents."
@@ -318,7 +318,7 @@ function useStore() {
     }
   }
   async function extract() {
-    if (!selected) return;
+    if (!selected) return null;
     setBusy(true);
     try {
       if (mode === "demo") {
@@ -326,13 +326,16 @@ function useStore() {
           throw new Error(
             "Your file is ready to preview. Connect the local API in Settings to run a real extraction.",
           );
-        updateDocument({
+        const extracted: Document = {
           ...selected,
           fields: sampleDocuments.find((d) => d.id === selected.id)!.fields,
-        });
-        setMessage(
-          "Demo extraction loaded from the sample fixture. No model was called.",
-        );
+        };
+        updateDocument(extracted);
+        if (page !== "Configuration")
+          setMessage(
+            "Demo extraction loaded from the sample fixture. No model was called.",
+          );
+        return extracted;
       } else {
         let processor = activeProcessor || processors[0];
         if (!processor) {
@@ -347,19 +350,23 @@ function useStore() {
           processor.name,
         );
         const extraction = result.extraction || result;
-        updateDocument({
+        const extracted: Document = {
           ...selected,
           fields: api.extractionFields(extraction),
           status: "Extracted",
           runId: undefined,
           warnings: extraction.warnings || result.warnings || [],
-        });
-        setMessage(
-          "Extraction preview complete. This preview has not created an evaluation run.",
-        );
+        };
+        updateDocument(extracted);
+        if (page !== "Configuration")
+          setMessage(
+            "Extraction preview complete. This preview has not created an evaluation run.",
+          );
+        return extracted;
       }
     } catch (e) {
       notifyError(e);
+      return null;
     } finally {
       setBusy(false);
     }
