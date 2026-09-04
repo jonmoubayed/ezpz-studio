@@ -3,6 +3,10 @@ import {
   defaultConfig,
   readStored,
   sampleDatasets,
+  sampleGroups,
+  sampleProcessors,
+  type Processor,
+  type EvalGroup,
   sampleDocuments,
   sampleRuns,
   type Config,
@@ -29,6 +33,8 @@ function useStore() {
       const page = decodeURIComponent(location.hash.slice(1)) as Page;
       return [
         "Overview",
+        "Configuration",
+        "Processors",
         "Playground",
         "Datasets",
         "Evaluations",
@@ -45,7 +51,13 @@ function useStore() {
   const [documents, setDocuments] = useState<Document[]>(sampleDocuments);
   const [datasets, setDatasets] = useState<Dataset[]>(sampleDatasets);
   const [runs, setRuns] = useState<Run[]>(
-    readStored("ezpz-redesign-runs", sampleRuns),
+    readStored<Run[]>("ezpz-redesign-runs", sampleRuns).map((r) => ({
+      ...sampleRuns.find((sample) => sample.id === r.id),
+      ...r,
+    })),
+  );
+  const [evalGroups, setEvalGroups] = useState<EvalGroup[]>(
+    readStored("ezpz-redesign-groups", sampleGroups),
   );
   const [selectedId, setSelectedId] = useState("sample-0");
   const [config, setConfig] = useState<Config>(
@@ -57,7 +69,129 @@ function useStore() {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
-  const [processors, setProcessors] = useState<any[]>([]);
+  const [processors, setProcessors] = useState<Processor[]>(
+    readStored("ezpz-redesign-processors", sampleProcessors),
+  );
+  const [activeProcessorId, setActiveProcessorId] = useState<string>(
+    readStored("ezpz-redesign-active-processor", ""),
+  );
+  const [configRevision, setConfigRevision] = useState(0);
+  const [newProcessorDraft, setNewProcessorDraft] = useState<Config | null>(
+    null,
+  );
+  const activeProcessor = processors.find((p) => p.id === activeProcessorId);
+  function chooseProcessor(p: Processor, config = p.config) {
+    setActiveProcessorId(p.id);
+    if (mode === "demo")
+      localStorage.setItem(
+        "ezpz-redesign-active-processor",
+        JSON.stringify(p.id),
+      );
+    updateConfig(structuredClone(config));
+    setConfigRevision((v) => v + 1);
+  }
+  function persistProcessors(next: Processor[]) {
+    setProcessors(next);
+    if (mode === "demo")
+      localStorage.setItem("ezpz-redesign-processors", JSON.stringify(next));
+  }
+  async function createProcessor(name: string, description: string, c: Config) {
+    setBusy(true);
+    try {
+      if (
+        processors.some(
+          (p) => p.name.toLowerCase() === name.trim().toLowerCase(),
+        )
+      )
+        throw new Error(
+          "A processor with this name already exists. Choose a different name.",
+        );
+      const id = crypto.randomUUID(),
+        date = new Date().toISOString();
+      const p: Processor =
+        mode === "live"
+          ? api.normalizeProcessor(
+              await api.newProcessor(name.trim(), c, description),
+            )
+          : {
+              id,
+              name: name.trim(),
+              description,
+              config: structuredClone(c),
+              version: 1,
+              versionId: id,
+              updatedAt: date,
+              versions: [{ id, version: 1, config: structuredClone(c), date }],
+            };
+      persistProcessors([p, ...processors]);
+      chooseProcessor(p);
+      setNewProcessorDraft(null);
+      navigate("Configuration");
+      setMessage(
+        "Processor saved. Customize its configuration and test it in the playground.",
+      );
+      return true;
+    } catch (e) {
+      notifyError(e);
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function saveProcessor(name: string, description: string) {
+    if (!activeProcessor) return false;
+    setBusy(true);
+    try {
+      if (!name.trim()) throw new Error("Give this processor a name.");
+      if (
+        processors.some(
+          (p) =>
+            p.id !== activeProcessor.id &&
+            p.name.toLowerCase() === name.trim().toLowerCase(),
+        )
+      )
+        throw new Error("A processor with this name already exists.");
+      let next: Processor;
+      if (mode === "live") {
+        await api.saveProcessorVersion(activeProcessor.id, config, {
+          name: name.trim(),
+          description,
+        });
+        next = api.normalizeProcessor(
+          (await api.request(`/processors/${activeProcessor.id}`)).processor,
+        );
+      } else {
+        const version = activeProcessor.version + 1,
+          id = crypto.randomUUID(),
+          date = new Date().toISOString();
+        next = {
+          ...activeProcessor,
+          name: name.trim(),
+          description,
+          config: structuredClone(config),
+          version,
+          versionId: id,
+          updatedAt: date,
+          versions: [
+            { id, version, config: structuredClone(config), date },
+            ...activeProcessor.versions,
+          ],
+        };
+      }
+      persistProcessors(processors.map((p) => (p.id === next.id ? next : p)));
+      setMessage(`Saved ${next.name} · version ${next.version}.`);
+      return true;
+    } catch (e) {
+      notifyError(e);
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+  function saveAsProcessor() {
+    setNewProcessorDraft(structuredClone(config));
+    navigate("Processors");
+  }
   const selected = documents.find((d) => d.id === selectedId) || documents[0];
   function navigate(p: Page) {
     setPageState(p);
@@ -95,7 +229,9 @@ function useStore() {
       setDatasets(data.datasets);
       setRuns(data.runs);
       setProcessors(data.processors);
+      setEvalGroups(data.evalGroups);
       setSelectedId(data.documents[0]?.id || "");
+      setActiveProcessorId("");
       setMode("live");
       setReviews([]);
       setMessage(
@@ -109,9 +245,17 @@ function useStore() {
   }
   function demo() {
     setMode("demo");
+    setProcessors(readStored("ezpz-redesign-processors", sampleProcessors));
+    setActiveProcessorId(readStored("ezpz-redesign-active-processor", ""));
     setDocuments(sampleDocuments);
     setDatasets(sampleDatasets);
-    setRuns(readStored("ezpz-redesign-runs", sampleRuns));
+    setEvalGroups(readStored("ezpz-redesign-groups", sampleGroups));
+    setRuns(
+      readStored<Run[]>("ezpz-redesign-runs", sampleRuns).map((r) => ({
+        ...sampleRuns.find((sample) => sample.id === r.id),
+        ...r,
+      })),
+    );
     setReviews(readStored("ezpz-redesign-reviews", []));
     setSelectedId("sample-0");
     setMessage(
@@ -119,6 +263,9 @@ function useStore() {
     );
   }
   function resetDemo() {
+    localStorage.removeItem("ezpz-redesign-groups");
+    localStorage.removeItem("ezpz-redesign-processors");
+    localStorage.removeItem("ezpz-redesign-active-processor");
     localStorage.removeItem("ezpz-redesign-runs");
     localStorage.removeItem("ezpz-redesign-reviews");
     updateConfig(defaultConfig);
@@ -131,6 +278,7 @@ function useStore() {
       setRuns(data.runs);
       setDatasets(data.datasets);
       setProcessors(data.processors);
+      setEvalGroups(data.evalGroups);
     }
   }
   async function upload(files: File[]) {
@@ -186,11 +334,10 @@ function useStore() {
           "Demo extraction loaded from the sample fixture. No model was called.",
         );
       } else {
-        let processor = processors[0];
+        let processor = activeProcessor || processors[0];
         if (!processor) {
-          processor = await api.newProcessor(
-            `studio-preview-${Date.now()}`,
-            config,
+          processor = api.normalizeProcessor(
+            await api.newProcessor(`studio-preview-${Date.now()}`, config),
           );
           setProcessors([processor]);
         }
@@ -221,15 +368,38 @@ function useStore() {
     name: string,
     datasetId: string,
     configuration: Config = config,
+    group?: { id?: string; name?: string; processorId?: string },
   ) {
     setBusy(true);
     try {
       if (mode === "demo") {
         const ds = datasets.find((d) => d.id === datasetId);
+        let targetGroup = evalGroups.find((g) =>
+          group?.id
+            ? g.id === group.id
+            : !group?.name && g.datasetId === datasetId,
+        );
+        if (!targetGroup) {
+          targetGroup = {
+            id: crypto.randomUUID(),
+            name: group?.name || `${name} · iterations`,
+            datasetId,
+          };
+          const nextGroups = [...evalGroups, targetGroup];
+          setEvalGroups(nextGroups);
+          localStorage.setItem(
+            "ezpz-redesign-groups",
+            JSON.stringify(nextGroups),
+          );
+        }
         const r: Run = {
           ...sampleRuns[0],
           id: crypto.randomUUID(),
           name,
+          groupId: targetGroup.id,
+          groupName: targetGroup.name,
+          config: structuredClone(configuration),
+          experimentId: crypto.randomUUID(),
           model: configuration.model,
           provider: configuration.provider,
           score: 0.976,
@@ -246,7 +416,10 @@ function useStore() {
           "Demo run added using a fixed illustrative score. Connect the API to measure real changes.",
         );
       } else {
-        await api.runBenchmark(datasetId, configuration, name);
+        await api.runBenchmark(datasetId, configuration, name, {
+          ...group,
+          processorId: group?.processorId || activeProcessor?.id,
+        });
         await refresh();
         setMessage(
           "Benchmark complete. The run and its configuration are saved in the local API.",
@@ -312,6 +485,17 @@ function useStore() {
     datasets,
     setDatasets,
     runs,
+    evalGroups,
+    processors,
+    configRevision,
+    activeProcessor,
+    activeProcessorId,
+    chooseProcessor,
+    createProcessor,
+    saveProcessor,
+    saveAsProcessor,
+    newProcessorDraft,
+    setNewProcessorDraft,
     setRuns,
     selected,
     selectedId,

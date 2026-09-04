@@ -96,3 +96,15 @@ Browser verification covers PDF rendering and field overlays, saved corrections,
 - `scripts/` — local vendor assets, sample generation, isolated integration runner
 
 No cloud deployment, authentication service, or hosted model is required to run the frontend.
+
+## Processors, schemas, and evaluation iterations
+
+- **Processors** is the reusable extraction library. Create an arbitrary custom schema or start from invoice, 1099, receipt, or contract fields. Duplicate any processor, edit its metadata, save versions, load previous versions into a working copy, and test it in Playground.
+- **Configure** opens its own page. The actual Extend UI Schema Builder provides nested object/array tables, editable enum descriptions, drag reordering, and a synchronized JSON view. Direct JSON editing is also available. The adapter retains required fields and constraints through renames and moves; advanced schemas that the visual table cannot represent stay in the JSON editor.
+- **Evaluations** groups iterations by the backend evaluation group, with a selectable baseline, accuracy trend, score deltas, model/parser details, latency, and cost. Compare 2–4 runs with saved prompt and schema snapshots. Inspect a run on a full results page with document navigation, failure hotspots, expected/actual values, and source citations in Extend's viewer.
+- Demo processors and versions persist in browser local storage. Live processors and immutable versions use `/v1/processors` and its draft/publish endpoints; evaluation groups and experiments use `/v1/eval-groups`. Saving a version stores it in the local backend; it does not deploy an external service. Earlier run snapshots remain unchanged.
+- Demo evaluation fields and metrics are explicitly illustrative. Live inspection uses the selected run's own extraction/evaluation records, including missing fields and unscored values.
+
+Schema Builder source: `https://www.extend.ai/ui/r/styles/new-york/schema-builder.json` (license in `EXTEND-LICENSE.md`). Local adaptations replace registry icon placeholders, add accessible input names, and allow the JSON view to display the full schema with preserved constraints. New primitives are shadcn Tabs and Collapsible.
+
+`npm test` covers schema round trips, nested moves, validation, evaluation grouping, and missing/null/zero field values. `npm run test:integration` additionally verifies processor metadata/version persistence, group membership, immutable evaluation snapshots, and repeated runs against a saved configuration using a disposable local backend.

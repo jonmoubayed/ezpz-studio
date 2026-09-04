@@ -489,9 +489,11 @@ export function RunsTable({
 export function ConfigForm({
   config,
   onChange,
+  showSchema = true,
 }: {
   config: Config;
   onChange: (c: Config) => void;
+  showSchema?: boolean;
 }) {
   const patch = (p: Partial<Config>) => onChange({ ...config, ...p });
   return (
@@ -569,29 +571,41 @@ export function ConfigForm({
           onChange={(e) => patch({ prompt: e.target.value })}
         />
       </label>
-      <label>
-        Output schema <span className="label-note">JSON Schema</span>
-        <textarea
-          className="code-editor"
-          rows={8}
-          spellCheck={false}
-          value={config.schema}
-          onChange={(e) => patch({ schema: e.target.value })}
-        />
-      </label>
+      {showSchema && (
+        <label>
+          Output schema <span className="label-note">JSON Schema</span>
+          <textarea
+            className="code-editor"
+            rows={8}
+            spellCheck={false}
+            value={config.schema}
+            onChange={(e) => patch({ schema: e.target.value })}
+          />
+        </label>
+      )}
     </div>
   );
 }
 export function RunModal({
   open,
   onClose,
+  groupId,
 }: {
   open: boolean;
   onClose: () => void;
+  groupId?: string;
 }) {
   const s = useStudio();
   const [name, setName] = useState("Untitled experiment");
-  const [dataset, setDataset] = useState(s.datasets[0]?.id || "");
+  const [processorId, setProcessorId] = useState(s.activeProcessor?.id || "");
+  const [group, setGroup] = useState(groupId || s.evalGroups[0]?.id || "new");
+  const [groupName, setGroupName] = useState("");
+  const [dataset, setDataset] = useState(
+    s.evalGroups.find((g) => g.id === (groupId || s.evalGroups[0]?.id))
+      ?.datasetId ||
+      s.datasets[0]?.id ||
+      "",
+  );
   const [config, setConfig] = useState(s.config);
   const [error, setError] = useState("");
   return (
@@ -603,12 +617,62 @@ export function RunModal({
       wide
     >
       <label>
+        Processor configuration
+        <select
+          value={processorId}
+          onChange={(e) => {
+            setProcessorId(e.target.value);
+            const p = s.processors.find((p) => p.id === e.target.value);
+            setConfig(structuredClone(p?.config || s.config));
+          }}
+        >
+          <option value="">Current playground configuration</option>
+          {s.processors.map((p) => (
+            <option value={p.id} key={p.id}>
+              {p.name} · v{p.version}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        Evaluation group
+        <select
+          value={group}
+          onChange={(e) => {
+            setGroup(e.target.value);
+            const g = s.evalGroups.find((g) => g.id === e.target.value);
+            if (g) setDataset(g.datasetId);
+          }}
+        >
+          {s.evalGroups.map((g) => (
+            <option key={g.id} value={g.id}>
+              {g.name}
+            </option>
+          ))}
+          <option value="new">Create a new group…</option>
+        </select>
+      </label>
+      {group === "new" && (
+        <label>
+          Group name
+          <input
+            value={groupName}
+            onChange={(e) => setGroupName(e.target.value)}
+            placeholder="e.g. Invoice extraction"
+          />
+        </label>
+      )}
+      <label>
         Experiment name
         <input value={name} onChange={(e) => setName(e.target.value)} />
       </label>
       <label>
         Benchmark dataset
-        <select value={dataset} onChange={(e) => setDataset(e.target.value)}>
+        <select
+          value={dataset}
+          disabled={group !== "new"}
+          onChange={(e) => setDataset(e.target.value)}
+        >
           <option value="" disabled>
             Select a dataset
           </option>
@@ -623,7 +687,6 @@ export function RunModal({
         config={config}
         onChange={(c) => {
           setConfig(c);
-          s.updateConfig(c);
         }}
       />
       {s.mode === "demo" && (
@@ -641,7 +704,12 @@ export function RunModal({
         <Button onClick={onClose}>Cancel</Button>
         <Button
           variant="primary"
-          disabled={s.busy || !dataset || !name.trim()}
+          disabled={
+            s.busy ||
+            !dataset ||
+            !name.trim() ||
+            (group === "new" && !groupName.trim())
+          }
           onClick={async () => {
             try {
               const schema = JSON.parse(config.schema);
@@ -652,7 +720,17 @@ export function RunModal({
             }
             setError("");
             s.updateConfig(config);
-            if (await s.benchmark(name, dataset, config)) onClose();
+            if (
+              await s.benchmark(
+                name,
+                dataset,
+                config,
+                group === "new"
+                  ? { name: groupName, processorId }
+                  : { id: group, processorId },
+              )
+            )
+              onClose();
           }}
         >
           {s.busy ? (
@@ -666,319 +744,6 @@ export function RunModal({
         </Button>
       </div>
     </Modal>
-  );
-}
-export function Evaluations() {
-  const s = useStudio();
-  const [q, setQ] = useState("");
-  const [filter, setFilter] = useState("all");
-  const [sort, setSort] = useState("recent");
-  const [selected, setSelected] = useState<string[]>([]);
-  const [compare, setCompare] = useState(false);
-  const [newRun, setNewRun] = useState(false);
-  const [detail, setDetail] = useState<Run | null>(null);
-  const [raw, setRaw] = useState<any>(null);
-  const rows = s.runs
-    .filter(
-      (r) =>
-        `${r.name} ${r.model}`.toLowerCase().includes(q.toLowerCase()) &&
-        (filter === "all" || r.datasetId === filter),
-    )
-    .sort((a, b) =>
-      sort === "accuracy"
-        ? (b.score ?? -1) - (a.score ?? -1)
-        : new Date(b.date).getTime() - new Date(a.date).getTime(),
-    );
-  const chosen = s.runs.filter((r) => selected.includes(r.id));
-  const valid =
-    chosen.length === 2 &&
-    !!chosen[0].datasetId &&
-    chosen[0].datasetId === chosen[1].datasetId;
-  const ordered = [...chosen].sort(
-    (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
-  );
-  async function open(r: Run) {
-    setDetail(r);
-    setRaw(null);
-    if (s.mode === "live")
-      try {
-        setRaw(await api.request(`/runs/${r.id}`));
-      } catch (e) {
-        s.notifyError(e);
-      }
-  }
-  async function inspectRun() {
-    if (!detail) return;
-    if (s.mode === "live" && raw?.run) {
-      const run = raw.run;
-      const extraction = run.extractions?.[0];
-      if (!extraction) {
-        s.setMessage("This run does not contain an extraction.");
-        return;
-      }
-      const document = s.documents.find((d) => d.id === extraction.document_id);
-      if (document) {
-        s.setDocuments((documents) =>
-          documents.map((doc) => {
-            const ex = run.extractions.find(
-              (e: any) => e.document_id === doc.id,
-            );
-            if (!ex) return { ...doc, fields: [], runId: undefined };
-            const evaluation = run.evaluations?.find(
-              (e: any) => e.extraction_id === ex.id,
-            );
-            const fields = api.extractionFields(ex).map((field) => ({
-              ...field,
-              expected: evaluation?.fields?.[field.key]?.expected ?? null,
-              status: evaluation?.fields?.[field.key]?.status,
-            }));
-            return {
-              ...doc,
-              fields,
-              runId: detail.id,
-              warnings: ex.warnings || [],
-            };
-          }),
-        );
-        s.setReviews(
-          (run.review_decisions || []).map((r: any) => ({
-            documentId: r.document_id,
-            field: r.field_path,
-            status: r.status,
-            value: r.corrected_value,
-            note: r.note,
-            runId: r.run_id,
-            at: r.updated_at,
-          })),
-        );
-        s.setSelectedId(document.id);
-        s.navigate("Review queue");
-      }
-    } else {
-      s.navigate("Playground");
-    }
-    setDetail(null);
-  }
-  return (
-    <>
-      <Heading
-        eyebrow="MEASURE WHAT MATTERS"
-        title="Every run, in perspective."
-        description="Compare configurations against the same ground truth. Find what actually improves."
-        actions={
-          <>
-            <Button
-              onClick={() => downloadJson("ezpz-evaluation-runs.json", s.runs)}
-            >
-              <Download size={15} />
-              Export runs
-            </Button>
-            <Button variant="primary" onClick={() => setNewRun(true)}>
-              <Plus size={16} />
-              New evaluation
-            </Button>
-          </>
-        }
-      />
-      <div className="eval-summary">
-        <div>
-          <span className="feature-icon">
-            <FlaskConical size={23} />
-          </span>
-          <section>
-            <h3>Your experiments, all in one place.</h3>
-            <p>
-              A run captures the model, prompt, parser, and schema used for
-              every result.
-            </p>
-          </section>
-        </div>
-        <span>
-          <strong>{s.runs.length}</strong>total runs
-        </span>
-        <span>
-          <strong>{s.datasets.length}</strong>benchmarks
-        </span>
-      </div>
-      <section className="panel">
-        <div className="table-toolbar">
-          <div className="search-box">
-            <Search size={16} />
-            <input
-              aria-label="Search runs"
-              placeholder="Search experiments or models…"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-            />
-          </div>
-          <select
-            aria-label="Filter by dataset"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-          >
-            <option value="all">All datasets</option>
-            {s.datasets.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name}
-              </option>
-            ))}
-          </select>
-          <select
-            aria-label="Sort runs"
-            value={sort}
-            onChange={(e) => setSort(e.target.value)}
-          >
-            <option value="recent">Most recent</option>
-            <option value="accuracy">Highest accuracy</option>
-          </select>
-          <Button disabled={!valid} onClick={() => setCompare(true)}>
-            <GitBranch size={14} />
-            Compare {selected.length > 0 && `(${selected.length})`}
-          </Button>
-        </div>
-        <RunsTable
-          runs={rows}
-          selected={selected}
-          onSelect={(id) =>
-            setSelected((ids) =>
-              ids.includes(id)
-                ? ids.filter((i) => i !== id)
-                : [...ids.slice(-1), id],
-            )
-          }
-          onOpen={open}
-        />
-        <div className="panel-footer">
-          <span>
-            {rows.length} runs
-            {selected.length > 0
-              ? " · Select two runs from the same dataset to compare."
-              : ""}
-          </span>
-          <span>Immutable results. Reproducible experiments.</span>
-        </div>
-      </section>
-      <RunModal open={newRun} onClose={() => setNewRun(false)} />
-      <Modal
-        title="Compare evaluation runs"
-        description="Changes measured on the same benchmark dataset."
-        open={compare}
-        onClose={() => setCompare(false)}
-        wide
-      >
-        {ordered.length === 2 && (
-          <>
-            <div className="comparison-head">
-              <div>
-                <Badge>BASELINE</Badge>
-                <h3>{ordered[0].name}</h3>
-                <p>{ordered[0].model}</p>
-              </div>
-              <ArrowRight size={22} />
-              <div>
-                <Badge tone="green">CANDIDATE</Badge>
-                <h3>{ordered[1].name}</h3>
-                <p>{ordered[1].model}</p>
-              </div>
-            </div>
-            <table className="data-table comparison-table">
-              <thead>
-                <tr>
-                  <th>Metric</th>
-                  <th>Baseline</th>
-                  <th>Candidate</th>
-                  <th>Change</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[
-                  [
-                    "Field accuracy",
-                    pct(ordered[0].score),
-                    pct(ordered[1].score),
-                    ordered.every((r) => r.score !== null)
-                      ? `${((ordered[1].score! - ordered[0].score!) * 100).toFixed(1)} pts`
-                      : "—",
-                  ],
-                  [
-                    "Latency",
-                    `${ordered[0].latency.toFixed(1)}s`,
-                    `${ordered[1].latency.toFixed(1)}s`,
-                    `${(ordered[1].latency - ordered[0].latency).toFixed(1)}s`,
-                  ],
-                  [
-                    "Run cost",
-                    `$${ordered[0].cost.toFixed(3)}`,
-                    `$${ordered[1].cost.toFixed(3)}`,
-                    `$${(ordered[1].cost - ordered[0].cost).toFixed(3)}`,
-                  ],
-                ].map((row) => (
-                  <tr key={row[0]}>
-                    {row.map((v, i) => (
-                      <td key={i}>{v}</td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <Button
-              onClick={() => downloadJson("ezpz-comparison.json", ordered)}
-            >
-              <Download size={14} />
-              Export comparison
-            </Button>
-          </>
-        )}
-      </Modal>
-      <Modal
-        title={detail?.name || "Run details"}
-        description="An immutable snapshot of this experiment."
-        open={!!detail}
-        onClose={() => setDetail(null)}
-        wide
-      >
-        {detail && (
-          <>
-            <div className="detail-metrics">
-              <Stat
-                label="Field accuracy"
-                value={pct(detail.score)}
-                detail={detail.dataset}
-              />
-              <Stat
-                label="Latency"
-                value={`${detail.latency.toFixed(1)}s`}
-                detail={`${detail.documents} documents`}
-              />
-              <Stat
-                label="Run cost"
-                value={`$${detail.cost.toFixed(3)}`}
-                detail={detail.model}
-              />
-            </div>
-            <pre className="json-output">
-              {JSON.stringify(raw?.run?.processor_version || detail, null, 2)}
-            </pre>
-            <div className="modal-actions">
-              <Button
-                onClick={() => downloadJson(`${detail.id}.json`, raw || detail)}
-              >
-                <Download size={14} />
-                Export snapshot
-              </Button>
-              <Button
-                variant="primary"
-                onClick={inspectRun}
-                disabled={s.mode === "live" && !raw}
-              >
-                Inspect results
-                <ArrowRight size={14} />
-              </Button>
-            </div>
-          </>
-        )}
-      </Modal>
-    </>
   );
 }
 export function HillClimbing() {

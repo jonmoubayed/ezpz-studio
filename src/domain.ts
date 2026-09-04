@@ -1,6 +1,8 @@
 export type Page =
   | "Overview"
   | "Playground"
+  | "Configuration"
+  | "Processors"
   | "Datasets"
   | "Evaluations"
   | "Hill climbing"
@@ -41,7 +43,17 @@ export type Document = {
   runId?: string;
   warnings?: string[];
 };
+export type EvalGroup = {
+  id: string;
+  name: string;
+  datasetId: string;
+  description?: string;
+};
 export type Run = {
+  groupId?: string;
+  groupName?: string;
+  experimentId?: string;
+  config?: Config;
   id: string;
   name: string;
   model: string;
@@ -257,6 +269,27 @@ export const sampleRuns: Run[] = [
     version: 3,
   },
 ];
+export const sampleGroups: EvalGroup[] = [
+  {
+    id: "invoice-extraction",
+    name: "Invoice extraction",
+    datasetId: "invoices",
+    description:
+      "Improve invoice extraction across models and prompt iterations.",
+  },
+];
+// Explicit demo configuration snapshots; live runs always use backend snapshots.
+for (const run of sampleRuns) {
+  run.groupId = "invoice-extraction";
+  run.groupName = "Invoice extraction";
+  run.experimentId = run.id;
+  run.config = {
+    ...defaultConfig,
+    model: run.model,
+    provider: run.provider,
+    prompt: `${defaultConfig.prompt}\nIteration focus: ${run.name}.`,
+  };
+}
 export const sampleDatasets: Dataset[] = [
   {
     id: "invoices",
@@ -286,3 +319,119 @@ export function downloadJson(name: string, value: unknown) {
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+export type Processor = {
+  id: string;
+  name: string;
+  description: string;
+  config: Config;
+  version: number;
+  versionId?: string;
+  updatedAt: string;
+  versions: { id: string; version: number; config: Config; date: string }[];
+};
+export const processorStarters: {
+  id: string;
+  name: string;
+  description: string;
+  config: Config;
+}[] = [
+  {
+    id: "blank",
+    name: "Custom extractor",
+    description: "Start with an empty schema. Define any document and output.",
+    config: {
+      ...defaultConfig,
+      prompt:
+        "Extract the requested fields faithfully. Return null when a value is absent.",
+      schema: JSON.stringify({ type: "object", properties: {} }, null, 2),
+    },
+  },
+  {
+    id: "invoice",
+    name: "Invoice extraction",
+    description: "Invoice details, vendor, dates, and amounts.",
+    config: defaultConfig,
+  },
+  ...[
+    {
+      id: "1099",
+      name: "1099 extraction",
+      description: "Payer, recipient, form type, and reported amounts.",
+      fields: {
+        form_type: "string",
+        tax_year: "integer",
+        payer_name: "string",
+        payer_tin: "string",
+        recipient_name: "string",
+        recipient_tin: "string",
+        nonemployee_compensation: "number",
+        federal_tax_withheld: "number",
+      },
+    },
+    {
+      id: "receipt",
+      name: "Receipt extraction",
+      description: "Merchant, purchase date, line items, and totals.",
+      fields: {
+        merchant: "string",
+        purchase_date: "string",
+        currency: "string",
+        subtotal: "number",
+        tax: "number",
+        total: "number",
+        payment_method: "string",
+      },
+    },
+    {
+      id: "contract",
+      name: "Contract extraction",
+      description: "Parties, dates, obligations, and termination terms.",
+      fields: {
+        contract_title: "string",
+        effective_date: "string",
+        expiration_date: "string",
+        governing_law: "string",
+        payment_terms: "string",
+        termination_clause: "string",
+      },
+    },
+  ].map((t) => ({
+    id: t.id,
+    name: t.name,
+    description: t.description,
+    config: {
+      ...defaultConfig,
+      prompt: `Extract ${t.name.replace(" extraction", "")} fields from the document. Preserve exact names and amounts; use ISO dates. Return null for values not present.`,
+      schema: JSON.stringify(
+        {
+          type: "object",
+          properties: Object.fromEntries(
+            Object.entries(t.fields).map(([key, type]) => [key, { type }]),
+          ),
+        },
+        null,
+        2,
+      ),
+    },
+  })),
+];
+export const sampleProcessors: Processor[] = processorStarters
+  .filter((t) => t.id !== "blank")
+  .map((t) => ({
+    id: `demo-processor-${t.id}`,
+    name: t.name,
+    description: t.description,
+    config: structuredClone(t.config),
+    version: 1,
+    versionId: `demo-version-${t.id}`,
+    updatedAt: "2026-09-04T09:00:00",
+    versions: [
+      {
+        id: `demo-version-${t.id}`,
+        version: 1,
+        config: structuredClone(t.config),
+        date: "2026-09-04T09:00:00",
+      },
+    ],
+  }));

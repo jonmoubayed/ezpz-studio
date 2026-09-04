@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import {
   Activity,
   ArrowDownToLine,
@@ -32,18 +32,18 @@ import {
 import { FileUpload } from "./components/extend/file-upload";
 import { Button, Modal, Notice, Busy } from "./ui";
 import { useStudio } from "./store";
-import {
-  Overview,
-  Evaluations,
-  HillClimbing,
-  Datasets,
-  Settings,
-} from "./pages";
+import { Overview, HillClimbing, Datasets, Settings } from "./pages";
 import { Playground, ReviewQueue } from "./workbench";
+import { Processors } from "./processors";
+import { Evaluations } from "./evaluations";
+const Configuration = lazy(() =>
+  import("./configuration").then((m) => ({ default: m.Configuration })),
+);
 import type { Page } from "./domain";
 const navigation: { page: Page; icon: typeof House; label?: string }[] = [
   { page: "Overview", icon: House },
   { page: "Playground", icon: FileScan },
+  { page: "Processors", icon: Layers },
   { page: "Datasets", icon: Database },
   { page: "Evaluations", icon: ChartNoAxesCombined },
   { page: "Hill climbing", icon: Mountain },
@@ -92,7 +92,13 @@ export default function App() {
     document.addEventListener("keydown", listener);
     const hash = () => {
       const p = decodeURIComponent(location.hash.slice(1)) as Page;
-      if ([...navigation.map((n) => n.page), "Settings"].includes(p))
+      if (
+        [
+          ...navigation.map((n) => n.page),
+          "Settings",
+          "Configuration",
+        ].includes(p)
+      )
         s.navigate(p);
     };
     window.addEventListener("hashchange", hash);
@@ -106,19 +112,25 @@ export default function App() {
     setSidebar(false);
     setSearchOpen(false);
   }
+  const currentNavigation =
+    s.page === "Configuration"
+      ? s.activeProcessor
+        ? "Processors"
+        : "Playground"
+      : s.page;
   const nav = (item: (typeof navigation)[number]) => (
     <button
       key={item.page}
       onClick={() => navigate(item.page)}
-      className={`nav-item ${s.page === item.page ? "active" : ""}`}
-      aria-current={s.page === item.page ? "page" : undefined}
+      className={`nav-item ${currentNavigation === item.page ? "active" : ""}`}
+      aria-current={currentNavigation === item.page ? "page" : undefined}
     >
       <item.icon size={17} />
       <span>{item.page}</span>
       {item.page === "Review queue" && remaining > 0 && (
         <span className="nav-count">{remaining}</span>
       )}
-      {s.page === item.page && item.page !== "Review queue" && (
+      {currentNavigation === item.page && item.page !== "Review queue" && (
         <span className="active-dot" />
       )}
     </button>
@@ -169,9 +181,9 @@ export default function App() {
         </button>
         <div className="nav-caption">WORKSPACE</div>
         <nav>
-          {navigation.slice(0, 3).map(nav)}
+          {navigation.slice(0, 4).map(nav)}
           <div className="nav-caption loop-caption">EXPERIMENT & IMPROVE</div>
-          {navigation.slice(3).map(nav)}
+          {navigation.slice(4).map(nav)}
         </nav>
         <div className="sidebar-bottom">
           <div className="local-card">
@@ -260,6 +272,14 @@ export default function App() {
             <Overview />
           ) : s.page === "Playground" ? (
             <Playground />
+          ) : s.page === "Configuration" ? (
+            <Suspense fallback={<Busy label="Loading configuration editor…" />}>
+              <Configuration
+                key={`${s.activeProcessorId || "scratch"}-${s.configRevision}`}
+              />
+            </Suspense>
+          ) : s.page === "Processors" ? (
+            <Processors />
           ) : s.page === "Evaluations" ? (
             <Evaluations />
           ) : s.page === "Hill climbing" ? (

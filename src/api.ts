@@ -1,4 +1,11 @@
-import type { Config, Dataset, Document, Field, Run } from "./domain";
+import type {
+  Config,
+  Dataset,
+  Document,
+  EvalGroup,
+  Field,
+  Run,
+} from "./domain";
 export async function request(path: string, options: RequestInit = {}) {
   const response = await fetch(`/v1${path}`, {
     ...options,
@@ -44,6 +51,20 @@ export const configPayload = (c: Config) => ({
 export function normalizeRun(r: any): Run {
   return {
     id: r.id,
+    groupId:
+      r.eval_group?.id || r.eval_experiment?.eval_group?.id || r.eval_group_id,
+    groupName: r.eval_group?.name || r.eval_experiment?.eval_group?.name,
+    experimentId: r.eval_experiment_id || r.eval_experiment?.id,
+    config: r.processor_version
+      ? {
+          provider: r.processor_version.model?.provider || "local",
+          model: r.processor_version.model?.name || "",
+          parser: r.processor_version.parser?.name || "",
+          prompt: r.processor_version.prompt?.extraction || "",
+          schema: JSON.stringify(r.processor_version.schema ?? {}, null, 2),
+          baseUrl: r.processor_version.model?.base_url || "",
+        }
+      : undefined,
     name:
       r.metadata?.name ||
       r.eval_experiment?.name ||
@@ -102,11 +123,12 @@ export function extractionFields(e: any, groundTruth?: any): Field[] {
   );
 }
 export async function loadWorkspace() {
-  const [d, s, r, p] = await Promise.all([
+  const [d, s, r, p, g] = await Promise.all([
     request("/documents"),
     request("/datasets"),
     request("/runs"),
     request("/processors"),
+    request("/eval-groups"),
   ]);
   return {
     documents: d.documents.map(normalizeDocument) as Document[],
@@ -117,7 +139,13 @@ export async function loadWorkspace() {
       count: x.document_count ?? 0,
     })) as Dataset[],
     runs: r.runs.map(normalizeRun) as Run[],
-    processors: p.processors,
+    processors: p.processors.map(normalizeProcessor),
+    evalGroups: g.eval_groups.map((g: any) => ({
+      id: g.id,
+      name: g.name,
+      datasetId: g.dataset_id,
+      description: g.description,
+    })) as EvalGroup[],
   };
 }
 export async function uploadDocument(file: File) {
@@ -146,16 +174,60 @@ export async function previewDocument(
     body: JSON.stringify({ document_id: d.id, config: configPayload(c) }),
   });
 }
-export async function newProcessor(name: string, c: Config) {
-  return (await post("/processors", { name, config: configPayload(c) }))
-    .processor;
+export async function newProcessor(name: string, c: Config, description = "") {
+  return (
+    await post("/processors", { name, description, config: configPayload(c) })
+  ).processor;
 }
-export async function runBenchmark(datasetId: string, c: Config, name: string) {
-  const processor = await newProcessor(`${name}-${Date.now()}`, c);
+export async function runBenchmark(
+  datasetId: string,
+  c: Config,
+  name: string,
+  group?: { id?: string; name?: string; processorId?: string },
+) {
+  let groupId = group?.id;
+  if (!groupId && !group?.name) {
+    const existing = await request("/eval-groups");
+    groupId = existing.eval_groups.find(
+      (g: any) => g.dataset_id === datasetId,
+    )?.id;
+  }
+  if (!groupId)
+    groupId = (
+      await post("/eval-groups", {
+        name: group?.name || `${name} · iterations`,
+        dataset_id: datasetId,
+      })
+    ).eval_group.id;
+  let processor = group?.processorId
+    ? (await request(`/processors/${encodeURIComponent(group.processorId)}`))
+        .processor
+    : await newProcessor(`${name}-${Date.now()}`, c);
+  let version = processor.versions[0];
+  if (
+    JSON.stringify(configPayload(versionConfig(version))) !==
+    JSON.stringify(configPayload(c))
+  )
+    version = await saveProcessorVersion(processor.id, c);
+  const { experiments } = await request(`/eval-groups/${groupId}/experiments`);
+  let experiment = experiments.find(
+    (e: any) => e.processor_version_id === version.id,
+  );
+  if (!experiment) {
+    let experimentName = name;
+    let suffix = 2;
+    while (experiments.some((e: any) => e.name === experimentName))
+      experimentName = `${name} · ${suffix++}`;
+    experiment = (
+      await post(`/eval-groups/${groupId}/experiments`, {
+        name: experimentName,
+        processor_version_id: version.id,
+      })
+    ).eval_experiment;
+  }
   const result = await post("/runs", {
+    eval_experiment_id: experiment.id,
     dataset_id: datasetId,
-    processor: processor.id,
-    version: 1,
     metadata: { name },
   });
   return result.run ? normalizeRun(result.run) : null;
@@ -185,4 +257,75 @@ export async function createDataset(name: string, documentIds: string[]) {
   for (const document_id of documentIds)
     await post(`/datasets/${dataset.id}/documents`, { document_id });
   return dataset;
+}
+
+export function versionConfig(v: any): Config {
+  return {
+    provider: v.model?.provider || "local",
+    model: v.model?.name || "",
+    parser: v.parser?.name || "native",
+    prompt: v.prompt?.extraction || "",
+    schema: JSON.stringify(
+      v.schema ?? { type: "object", properties: {} },
+      null,
+      2,
+    ),
+    baseUrl: v.model?.base_url || "",
+  };
+}
+export function normalizeProcessor(p: any): import("./domain").Processor {
+  const versions = (p.versions ?? [])
+    .map((v: any) => ({
+      id: v.id,
+      version: v.version,
+      config: versionConfig(v),
+      date: v.created_at,
+    }))
+    .sort((a: any, b: any) => b.version - a.version);
+  return {
+    id: p.id,
+    name: p.name,
+    description: p.description || "",
+    config: versions[0]?.config ?? versionConfig({}),
+    version: versions[0]?.version ?? 1,
+    versionId: versions[0]?.id,
+    updatedAt: versions[0]?.date || p.created_at,
+    versions,
+  };
+}
+export async function saveProcessorVersion(
+  id: string,
+  config: Config,
+  details?: { name: string; description: string },
+) {
+  if (details)
+    await request(`/processors/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(details),
+    });
+  const { harness, ...editable } = configPayload(config);
+  // Preserve harness, normalization, and provider-specific options that are not exposed in this editor.
+  const { draft } = await request(
+    `/processors/${encodeURIComponent(id)}/draft`,
+  );
+  const merged = {
+    ...editable,
+    parser: {
+      ...(draft.parser?.name === config.parser ? draft.parser : {}),
+      ...editable.parser,
+    },
+    model: {
+      ...(draft.model?.provider === config.provider ? draft.model : {}),
+      ...editable.model,
+    },
+    prompt: { ...draft.prompt, ...editable.prompt },
+  };
+  if (!["ollama", "openai-compatible"].includes(config.provider))
+    delete merged.model.base_url;
+  await request(`/processors/${encodeURIComponent(id)}/draft`, {
+    method: "PATCH",
+    body: JSON.stringify({ config: merged }),
+  });
+  return (await post(`/processors/${encodeURIComponent(id)}/draft/publish`, {}))
+    .version;
 }

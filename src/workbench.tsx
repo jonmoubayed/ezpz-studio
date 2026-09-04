@@ -38,7 +38,7 @@ const PDFViewer = lazy(() =>
 import { HumanReviewHighlight } from "./components/extend/human-review-highlight";
 import { Button, Badge, Busy, Empty, Heading, Modal } from "./ui";
 import { useStudio } from "./store";
-import { ConfigForm, ModelMark } from "./pages";
+import { ModelMark } from "./pages";
 import {
   downloadJson,
   displayValue,
@@ -133,7 +133,6 @@ export function Playground() {
   const s = useStudio();
   const [tab, setTab] = useState("Fields");
   const [active, setActive] = useState("invoice_number");
-  const [configOpen, setConfigOpen] = useState(false);
   const [filesOpen, setFilesOpen] = useState(false);
   const [q, setQ] = useState("");
   const [groundTruthOpen, setGroundTruthOpen] = useState(false);
@@ -173,11 +172,11 @@ export function Playground() {
   return (
     <>
       <Heading
-        title="From document to understanding."
-        description="See what your model sees. Inspect what it extracts."
+        title={s.activeProcessor ? s.activeProcessor.name : "Playground"}
+        description="Test an extractor and inspect its output against the source."
         actions={
           <>
-            <Button onClick={() => setConfigOpen(true)}>
+            <Button onClick={() => s.navigate("Configuration")}>
               <Settings2 size={15} />
               Configure
             </Button>
@@ -198,6 +197,32 @@ export function Playground() {
           </>
         }
       />
+      <div className="playground-processor">
+        <label>
+          Processor
+          <select
+            aria-label="Playground processor"
+            value={s.activeProcessor?.id || ""}
+            onChange={(e) => {
+              const p = s.processors.find((p) => p.id === e.target.value);
+              if (p) s.chooseProcessor(p);
+            }}
+          >
+            <option value="" disabled>
+              Unsaved configuration
+            </option>
+            {s.processors.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name} · v{p.version}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button onClick={s.saveAsProcessor}>Save as processor</button>
+        <button onClick={() => s.navigate("Processors")}>
+          Manage processors <ArrowRight size={12} />
+        </button>
+      </div>
       <div className="workbench-config">
         <div>
           <span className="config-step">
@@ -206,7 +231,10 @@ export function Playground() {
             {s.config.parser === "native" ? "Native text" : s.config.parser}
           </span>
           <ChevronRight size={13} />
-          <button className="config-step" onClick={() => setConfigOpen(true)}>
+          <button
+            className="config-step"
+            onClick={() => s.navigate("Configuration")}
+          >
             <span>02</span>
             <ModelMark provider={s.config.provider} />
             {s.config.model}
@@ -217,7 +245,7 @@ export function Playground() {
             className="config-step"
             onClick={() => {
               setTab("Schema");
-              setConfigOpen(true);
+              s.navigate("Configuration");
             }}
           >
             <span>03</span>
@@ -375,7 +403,7 @@ export function Playground() {
               <div className="schema-view">
                 <p>The schema defines the shape of your extraction.</p>
                 <pre className="json-output">{s.config.schema}</pre>
-                <Button onClick={() => setConfigOpen(true)}>
+                <Button onClick={() => s.navigate("Configuration")}>
                   <Braces size={14} />
                   Edit schema
                 </Button>
@@ -428,19 +456,6 @@ export function Playground() {
           </section>
         </div>
       )}
-      <Modal
-        title="Extraction configuration"
-        description="The same schema and prompt work across providers."
-        open={configOpen}
-        onClose={() => setConfigOpen(false)}
-        wide
-      >
-        <ConfigForm config={s.config} onChange={s.updateConfig} />
-        <Button variant="primary" onClick={() => setConfigOpen(false)}>
-          <Check size={14} />
-          Done
-        </Button>
-      </Modal>
       <Modal
         title="Choose a source document"
         description="Inspect an existing document or add a new one."
