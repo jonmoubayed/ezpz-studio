@@ -1,3 +1,4 @@
+import { FieldSelect } from "./components/field-select";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import {
   ArrowDownToLine,
@@ -200,23 +201,21 @@ export function Playground() {
       <div className="playground-processor">
         <label>
           Processor
-          <select
+          <FieldSelect
             aria-label="Playground processor"
             value={s.activeProcessor?.id || ""}
-            onChange={(e) => {
-              const p = s.processors.find((p) => p.id === e.target.value);
+            onValueChange={(value) => {
+              const p = s.processors.find((p) => p.id === value);
               if (p) s.chooseProcessor(p);
             }}
-          >
-            <option value="" disabled>
-              Unsaved configuration
-            </option>
-            {s.processors.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name} · v{p.version}
-              </option>
-            ))}
-          </select>
+            options={[
+              { value: "", label: "Unsaved configuration", disabled: true },
+              ...s.processors.map((p) => ({
+                value: p.id,
+                label: p.name + " · v" + p.version,
+              })),
+            ]}
+          />
         </label>
         <button onClick={s.saveAsProcessor}>Save as processor</button>
         <button onClick={() => s.navigate("Processors")}>

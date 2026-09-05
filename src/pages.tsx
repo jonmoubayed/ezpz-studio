@@ -1,3 +1,4 @@
+import { FieldSelect } from "./components/field-select";
 import { useState } from "react";
 import {
   ArrowDownToLine,
@@ -501,11 +502,11 @@ export function ConfigForm({
       <div className="form-row">
         <label>
           Model provider
-          <select
+          <FieldSelect
             value={config.provider}
-            onChange={(e) =>
+            onValueChange={(value) =>
               patch({
-                provider: e.target.value,
+                provider: value,
                 model: (
                   {
                     local: "deterministic-local",
@@ -515,23 +516,19 @@ export function ConfigForm({
                     ollama: "qwen3:8b",
                     "openai-compatible": "custom-model",
                   } as Record<string, string>
-                )[e.target.value],
+                )[value],
               })
             }
-          >
-            {[
+            aria-label="Model provider"
+            options={[
               ["local", "Local · deterministic"],
               ["openai", "OpenAI"],
               ["anthropic", "Anthropic"],
               ["google", "Google Gemini"],
               ["ollama", "Ollama"],
               ["openai-compatible", "OpenAI-compatible endpoint"],
-            ].map(([v, l]) => (
-              <option value={v} key={v}>
-                {l}
-              </option>
-            ))}
-          </select>
+            ].map(([value, label]) => ({ value, label }))}
+          />
         </label>
         <label>
           Model ID
@@ -554,14 +551,16 @@ export function ConfigForm({
       )}
       <label>
         Document parser
-        <select
+        <FieldSelect
           value={config.parser}
-          onChange={(e) => patch({ parser: e.target.value })}
-        >
-          <option value="native">Native text · local</option>
-          <option value="docling">Docling · local</option>
-          <option value="llama-parse">LlamaParse</option>
-        </select>
+          onValueChange={(value) => patch({ parser: value })}
+          aria-label="Document parser"
+          options={[
+            { value: "native", label: "Native text · local" },
+            { value: "docling", label: "Docling · local" },
+            { value: "llama-parse", label: "LlamaParse" },
+          ]}
+        />
       </label>
       <label>
         Extraction instructions
@@ -618,39 +617,38 @@ export function RunModal({
     >
       <label>
         Processor configuration
-        <select
+        <FieldSelect
           value={processorId}
-          onChange={(e) => {
-            setProcessorId(e.target.value);
-            const p = s.processors.find((p) => p.id === e.target.value);
+          onValueChange={(value) => {
+            setProcessorId(value);
+            const p = s.processors.find((p) => p.id === value);
             setConfig(structuredClone(p?.config || s.config));
           }}
-        >
-          <option value="">Current playground configuration</option>
-          {s.processors.map((p) => (
-            <option value={p.id} key={p.id}>
-              {p.name} · v{p.version}
-            </option>
-          ))}
-        </select>
+          aria-label="Processor configuration"
+          options={[
+            { value: "", label: "Current playground configuration" },
+            ...s.processors.map((p) => ({
+              value: p.id,
+              label: p.name + " · v" + p.version,
+            })),
+          ]}
+        />
       </label>
       <label>
         Evaluation group
-        <select
+        <FieldSelect
           value={group}
-          onChange={(e) => {
-            setGroup(e.target.value);
-            const g = s.evalGroups.find((g) => g.id === e.target.value);
+          onValueChange={(value) => {
+            setGroup(value);
+            const g = s.evalGroups.find((g) => g.id === value);
             if (g) setDataset(g.datasetId);
           }}
-        >
-          {s.evalGroups.map((g) => (
-            <option key={g.id} value={g.id}>
-              {g.name}
-            </option>
-          ))}
-          <option value="new">Create a new group…</option>
-        </select>
+          aria-label="Evaluation group"
+          options={[
+            ...s.evalGroups.map((g) => ({ value: g.id, label: g.name })),
+            { value: "new", label: "Create a new group…" },
+          ]}
+        />
       </label>
       {group === "new" && (
         <label>
@@ -668,20 +666,19 @@ export function RunModal({
       </label>
       <label>
         Benchmark dataset
-        <select
+        <FieldSelect
           value={dataset}
           disabled={group !== "new"}
-          onChange={(e) => setDataset(e.target.value)}
-        >
-          <option value="" disabled>
-            Select a dataset
-          </option>
-          {s.datasets.map((d) => (
-            <option value={d.id} key={d.id}>
-              {d.name} ({d.count} documents)
-            </option>
-          ))}
-        </select>
+          onValueChange={(value) => setDataset(value)}
+          aria-label="Benchmark dataset"
+          options={[
+            { value: "", label: "Select a dataset", disabled: true },
+            ...s.datasets.map((d) => ({
+              value: d.id,
+              label: d.name + " (" + d.count + " documents)",
+            })),
+          ]}
+        />
       </label>
       <ConfigForm
         config={config}
@@ -795,32 +792,30 @@ export function HillClimbing() {
             <div className="form-row">
               <label>
                 Dataset
-                <select
+                <FieldSelect
                   value={dataset}
-                  onChange={(e) => {
-                    setDataset(e.target.value);
+                  onValueChange={(value) => {
+                    setDataset(value);
                     setBaseline("");
                   }}
-                >
-                  {s.datasets.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.name}
-                    </option>
-                  ))}
-                </select>
+                  aria-label="Dataset"
+                  options={s.datasets.map((d) => ({
+                    value: d.id,
+                    label: d.name,
+                  }))}
+                />
               </label>
               <label>
                 Baseline run
-                <select
+                <FieldSelect
                   value={base?.id || ""}
-                  onChange={(e) => setBaseline(e.target.value)}
-                >
-                  {benchmarkRuns.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.name}
-                    </option>
-                  ))}
-                </select>
+                  onValueChange={(value) => setBaseline(value)}
+                  aria-label="Baseline run"
+                  options={benchmarkRuns.map((r) => ({
+                    value: r.id,
+                    label: r.name,
+                  }))}
+                />
               </label>
             </div>
             <div className="baseline-score">

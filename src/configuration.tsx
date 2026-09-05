@@ -1,3 +1,4 @@
+import { FieldSelect } from "./components/field-select";
 import { useState } from "react";
 import {
   ArrowLeft,
@@ -252,28 +253,33 @@ export function Configuration() {
                   <div className="processor-history">
                     <label>
                       Saved versions
-                      <select
+                      <FieldSelect
                         aria-label="Load processor version"
                         defaultValue=""
-                        onChange={(e) => {
+                        onValueChange={(value) => {
                           const v = s.activeProcessor?.versions.find(
-                            (v) => v.id === e.target.value,
+                            (v) => v.id === value,
                           );
                           if (v) {
                             s.chooseProcessor(s.activeProcessor!, v.config);
                           }
                         }}
-                      >
-                        <option value="" disabled>
-                          Load a saved version…
-                        </option>
-                        {s.activeProcessor.versions.map((v) => (
-                          <option key={v.id} value={v.id}>
-                            v{v.version} ·{" "}
-                            {new Date(v.date).toLocaleDateString()}
-                          </option>
-                        ))}
-                      </select>
+                        options={[
+                          {
+                            value: "",
+                            label: "Load a saved version…",
+                            disabled: true,
+                          },
+                          ...s.activeProcessor.versions.map((v) => ({
+                            value: v.id,
+                            label:
+                              "v" +
+                              v.version +
+                              " · " +
+                              new Date(v.date).toLocaleDateString(),
+                          })),
+                        ]}
+                      />
                     </label>
                     <button onClick={s.saveAsProcessor}>
                       Save as new processor
@@ -446,23 +452,17 @@ export function Configuration() {
         >
           <div className="pane-heading">
             <FileScan size={15} />
-            <select
+            <FieldSelect
               aria-label="Processor source document"
               value={source?.id || ""}
               disabled={running}
-              onChange={(e) => {
-                s.setSelectedId(e.target.value);
+              onValueChange={(value) => {
+                s.setSelectedId(value);
                 setActiveField("");
                 setPreviewError("");
               }}
-            >
-              {!source && <option value="">Choose a document</option>}
-              {s.documents.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-            </select>
+              options={s.documents.map((d) => ({ value: d.id, label: d.name }))}
+            />
             <Button
               title="Upload source document"
               disabled={s.busy}

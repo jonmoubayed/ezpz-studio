@@ -1,3 +1,4 @@
+import { FieldSelect } from "./components/field-select";
 import { useEffect, useState } from "react";
 import {
   ArrowLeft,
@@ -409,17 +410,12 @@ function RunComparison({
         </strong>
         <label>
           Baseline{" "}
-          <select
+          <FieldSelect
             aria-label="Comparison baseline"
             value={baseline.id}
-            onChange={(e) => setBaselineId(e.target.value)}
-          >
-            {runs.map((r) => (
-              <option value={r.id} key={r.id}>
-                {r.name}
-              </option>
-            ))}
-          </select>
+            onValueChange={(value) => setBaselineId(value)}
+            options={runs.map((r) => ({ value: r.id, label: r.name }))}
+          />
         </label>
         <button aria-label="Close comparison" onClick={onClose}>
           <X size={16} />
