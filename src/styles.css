@@ -1950,7 +1950,7 @@ h1 {
   background: #f7fbf2;
   box-shadow: 0 0 0 2px #d8e6ca33;
 }
-.field-card > div {
+.field-card > .field-source-trigger {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -4679,7 +4679,7 @@ h1 {
   align-items: start !important;
   text-align: left;
 }
-.field-comparison > span {
+.field-comparison > div {
   min-width: 0;
 }
 .field-comparison small {
@@ -4695,7 +4695,7 @@ h1 {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.field-comparison.has-difference > span:first-child code {
+.field-comparison.has-difference > div:first-child code {
   color: #a64f31;
 }
 .field-match {
@@ -4796,4 +4796,111 @@ h1 {
 }
 .expected-feedback.error p {
   color: #91452d;
+}
+
+.field-source-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  border-radius: 3px;
+  margin-bottom: 8px;
+}
+.field-source-trigger:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 3px;
+}
+.field-comparison.has-table,
+.review-values.has-table {
+  grid-template-columns: minmax(0, 1fr);
+}
+.structured-table-scroll {
+  max-width: 100%;
+  overflow: auto;
+  max-height: 360px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: white;
+}
+.structured-table-scroll:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+}
+.structured-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  text-align: left;
+  font-size: 11px;
+}
+.structured-table th,
+.structured-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  vertical-align: top;
+  min-width: 72px;
+  max-width: 280px;
+}
+.structured-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f4f6f0;
+  color: #53634c;
+  font-size: 10px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.structured-table th:last-child,
+.structured-table td:last-child {
+  border-right: 0;
+}
+.structured-table tbody tr:last-child > * {
+  border-bottom: 0;
+}
+.structured-table .structured-row-number {
+  min-width: 28px;
+  width: 28px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 400;
+  text-align: right;
+  background: #fafbf8;
+}
+.structured-table td code {
+  display: block;
+  min-width: 60px;
+  font: 11px/1.5 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0;
+}
+.structured-table .structured-missing {
+  font: 11px var(--font-mono);
+  color: var(--muted);
+}
+.structured-empty {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+.review-values.has-table > div {
+  min-width: 0;
+}
+.review-values.has-table > div:first-child {
+  border-right: 0;
+  border-bottom: 1px solid var(--border);
+}
+.review-values > div > code {
+  display: block;
+  font: 12px/1.6 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.structured-table .structured-text-column {
+  min-width: 180px;
 }

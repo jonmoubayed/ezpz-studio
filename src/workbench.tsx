@@ -1,3 +1,4 @@
+import { StructuredValue, isObjectArray } from "./structured-value";
 import { isLowConfidence } from "./confidence";
 import { ExpectedValuesEditor, FieldValues } from "./expected-values";
 import { FieldSelect } from "./components/field-select";
@@ -435,12 +436,17 @@ export function Playground() {
                 {d.fields.length ? (
                   <div className="field-list">
                     {d.fields.map((f) => (
-                      <button
+                      <article
                         key={f.key}
                         className={`field-card ${active === f.key ? "selected" : ""} ${isLowConfidence(f) ? "uncertain" : ""}`}
                         onClick={() => setActive(f.key)}
                       >
-                        <div>
+                        <button
+                          type="button"
+                          className="field-source-trigger"
+                          aria-label={`Inspect source for ${f.key}`}
+                          aria-pressed={active === f.key}
+                        >
                           <span className="field-name">
                             <span>
                               {typeof f.value === "number" ? "#" : "Aa"}
@@ -448,7 +454,7 @@ export function Playground() {
                             {f.key}
                           </span>
                           <ConfidenceBadge field={f} />
-                        </div>
+                        </button>
                         <FieldValues field={f} />
                         <small>
                           {f.area ? (
@@ -464,7 +470,7 @@ export function Playground() {
                             </>
                           )}
                         </small>
-                      </button>
+                      </article>
                     ))}
                   </div>
                 ) : (
@@ -757,19 +763,27 @@ export function ReviewQueue() {
               <ConfidenceBadge field={current.f} />
               <h2>{current.f.key}</h2>
               <p>Check this value against the highlighted source.</p>
-              <div className="review-values">
+              <div
+                className={`review-values ${isObjectArray(current.f.value) || isObjectArray(current.f.expected) ? "has-table" : ""}`}
+              >
                 <div>
                   <span>EXTRACTED VALUE</span>
-                  <strong>{displayValue(current.f.value)}</strong>
+                  <StructuredValue
+                    value={current.f.value}
+                    label={`${current.f.key} result`}
+                  />
                 </div>
                 <div>
                   <span>EXPECTED VALUE</span>
-                  <strong>
-                    {current.f.expected === null &&
-                    (!current.f.status || current.f.status === "unscored")
-                      ? "Not annotated"
-                      : displayValue(current.f.expected)}
-                  </strong>
+                  {current.f.expected === null &&
+                  (!current.f.status || current.f.status === "unscored") ? (
+                    <code>Not annotated</code>
+                  ) : (
+                    <StructuredValue
+                      value={current.f.expected}
+                      label={`${current.f.key} expected`}
+                    />
+                  )}
                 </div>
               </div>
               {current.review && (

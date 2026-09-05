@@ -537,15 +537,20 @@ function ProcessorPreview({
         <TabsContent value="fields">
           <div className="processor-preview-fields">
             {resultDocument.fields.map((f) => (
-              <button
+              <article
                 className={`processor-preview-field ${activeField === f.key ? "active" : ""}`}
                 key={f.key}
                 onClick={() => onField(f.key)}
               >
-                <span>
+                <button
+                  type="button"
+                  className="field-source-trigger"
+                  aria-label={`Inspect source for ${f.key}`}
+                  aria-pressed={activeField === f.key}
+                >
                   <strong>{f.key}</strong>
                   <ConfidenceBadge field={f} />
-                </span>
+                </button>
                 <FieldValues field={f} />
                 <small>
                   {f.area ? (
@@ -557,7 +562,7 @@ function ProcessorPreview({
                     "No source citation"
                   )}
                 </small>
-              </button>
+              </article>
             ))}
             {!preview.document.fields.length && (
               <Empty

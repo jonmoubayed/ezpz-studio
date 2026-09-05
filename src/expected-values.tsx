@@ -1,15 +1,11 @@
+import { StructuredValue, isObjectArray } from "./structured-value";
 import { useEffect, useRef, useState } from "react";
 import { Check, Database, Plus } from "lucide-react";
 import { FieldSelect } from "./components/field-select";
 import { Button, Busy } from "./ui";
 import { useStudio } from "./store";
 import * as api from "./api";
-import {
-  displayValue,
-  type Document,
-  type Field,
-  type JsonValue,
-} from "./domain";
+import { type Document, type Field, type JsonValue } from "./domain";
 import { equalValues, expectedValues, hasExpected } from "./result-model";
 
 export function FieldValues({ field }: { field: Field }) {
@@ -17,20 +13,25 @@ export function FieldValues({ field }: { field: Field }) {
   const match = annotated && equalValues(field.value, field.expected);
   return (
     <>
-      <span
-        className={`field-comparison ${annotated && !match ? "has-difference" : ""}`}
+      <div
+        className={`field-comparison ${isObjectArray(field.value) || (annotated && isObjectArray(field.expected)) ? "has-table" : ""} ${annotated && !match ? "has-difference" : ""}`}
       >
-        <span>
+        <div>
           <small>RESULT</small>
-          <code>{displayValue(field.value)}</code>
-        </span>
-        <span>
+          <StructuredValue value={field.value} label={`${field.key} result`} />
+        </div>
+        <div>
           <small>EXPECTED</small>
-          <code>
-            {annotated ? displayValue(field.expected) : "Not annotated"}
-          </code>
-        </span>
-      </span>
+          {annotated ? (
+            <StructuredValue
+              value={field.expected}
+              label={`${field.key} expected`}
+            />
+          ) : (
+            <code>Not annotated</code>
+          )}
+        </div>
+      </div>
       {annotated && (
         <span className={`field-match ${match ? "match" : "different"}`}>
           {match ? "Matches expected" : "Different from expected"}
