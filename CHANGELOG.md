@@ -6,6 +6,8 @@ First self-contained, single-user local beta.
 
 - Bundle the studio, Python API, native PDF parser, and English OCR in one Docker service with persistent storage.
 - Produce portable ARM64 and AMD64 image bundles, launch scripts, and SHA-256 checksums.
+- Download active document formats such as HTML/SVG as inert attachments.
+- Preserve active jobs during CLI access and failed duplicate server startups.
 - Restrict static serving to built assets; reject hidden paths, symlink escapes, untrusted hosts, and browser origins.
 - Report model failures explicitly without substituting deterministic extraction.
 - Freeze benchmark documents, annotation revisions, and processor versions at evaluation submission; use fresh extraction by default.

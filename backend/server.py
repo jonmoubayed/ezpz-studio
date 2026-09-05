@@ -39,7 +39,6 @@ class Runtime:
         self.database = create_database(self.settings.database_url, self.settings.sqlite_path)
         self.blobs = create_blob_store(self.settings.blob_root)
         self.database.initialize()
-        self.database._execute("UPDATE runs SET status = 'interrupted', error_text = 'Server restarted before the run finished. Run the experiment again.' WHERE status IN ('running', 'cancelling')")
         if self.settings.seed_demo:
             ensure_seed(self.database, self.blobs)
         else:
@@ -780,12 +779,20 @@ class EzpzHandler(BaseHTTPRequestHandler):
     def _source(self, document: Dict[str, Any]) -> None:
         content = self.runtime.blobs.get(document["blob_key"])
         content_type = "application/pdf" if looks_like_pdf(content) else document.get("mime_type") or mimetypes.guess_type(document.get("filename", ""))[0] or "application/octet-stream"
+        # Uploaded documents are untrusted, even in a local workspace.
+        # Only inert viewer formats may open inline on the application origin.
+        inline_types = {"application/pdf", "image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp", "image/tiff", "text/plain", "text/csv", "application/json"}
+        inline = content_type.split(";", 1)[0].strip().lower() in inline_types
+        if not inline:
+            content_type = "application/octet-stream"
         self.send_response(200)
         self._cors()
         self.send_header("X-Request-ID", self.request_id)
         self.send_header("X-Document-SHA256", document.get("sha256", ""))
         self.send_header("Content-Type", content_type)
-        self.send_header("Content-Disposition", 'inline; filename="{}"'.format(document.get("filename", "document").replace('"', "")))
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Security-Policy", "sandbox; default-src 'none'")
+        self.send_header("Content-Disposition", '{}; filename="{}"'.format("inline" if inline else "attachment", document.get("filename", "document").replace('"', "")))
         self.send_header("Cache-Control", "private, max-age=3600")
         self.send_header("Content-Length", str(len(content)))
         self.end_headers()
@@ -916,7 +923,15 @@ def make_server(root: Optional[Path] = None, host: str = "127.0.0.1", port: int 
     Handler.runtime = runtime
     built_frontend = runtime.root / "dist"
     Handler.static_root = Path(os.environ.get("EZPZ_STATIC_ROOT", str(built_frontend))).resolve()
-    return RuntimeHTTPServer((host, port), Handler)
+    server = RuntimeHTTPServer((host, port), Handler)
+    try:
+        # CLI readers must not change active jobs. Recover only after the API
+        # successfully binds, so a failed duplicate startup cannot stop a run.
+        runtime.database._execute("UPDATE runs SET status = 'interrupted', error_text = 'Server restarted before the run finished. Run the experiment again.' WHERE status IN ('running', 'cancelling')")
+    except Exception:
+        server.server_close()
+        raise
+    return server
 
 
 def main() -> None:

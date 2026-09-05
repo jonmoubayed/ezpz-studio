@@ -127,7 +127,11 @@ class BetaTests(unittest.TestCase):
         runtime = create_runtime(self.root)
         complete = runtime.extractions.run_dataset('ds_invoice_eval_2026')['run']
         pending = runtime.database.create_run(complete['processor_version_id'], 'dataset', dataset_id='ds_invoice_eval_2026')
-        reopened = create_runtime(self.root)
+        reader = create_runtime(self.root)
+        self.assertEqual(reader.database.get_run(pending['id'])['status'], 'running')
+        server = make_server(self.root, port=0)
+        self.addCleanup(server.server_close)
+        reopened = server.RequestHandlerClass.runtime
         self.assertEqual(reopened.database.get_run(pending['id'])['status'], 'interrupted')
         saved = reopened.database.get_run(complete['id'])
         self.assertEqual(saved['status'], 'completed')
@@ -171,3 +175,39 @@ class BetaTests(unittest.TestCase):
                 runtime.extractions.run_dataset('ds_invoice_eval_2026', background=True)
         self.assertTrue(runtime.extractions.background_slots.acquire(blocking=False))
         runtime.extractions.background_slots.release()
+
+
+    def test_failed_duplicate_server_start_preserves_active_run(self):
+        server = make_server(self.root, port=0)
+        self.addCleanup(server.server_close)
+        runtime = server.RequestHandlerClass.runtime
+        version = runtime.database.resolve_processor_version('invoice-extractor')
+        run = runtime.database.create_run(version['id'], 'dataset', dataset_id='ds_invoice_eval_2026')
+        with self.assertRaises(OSError):
+            make_server(self.root, port=server.server_address[1])
+        self.assertEqual(runtime.database.get_run(run['id'])['status'], 'running')
+
+    def test_uploaded_active_content_is_downloaded_and_inert_formats_stay_inline(self):
+        server = make_server(self.root, port=0)
+        worker = threading.Thread(target=server.serve_forever, daemon=True)
+        worker.start()
+        base = 'http://127.0.0.1:{}'.format(server.server_address[1])
+        try:
+            for name, mime, content, inline in [
+                ('active.html', 'text/html', b'<script>window.test=true</script>', False),
+                ('active.svg', 'image/svg+xml', b'<svg onload="window.test=true"/>', False),
+                ('active.xhtml', 'application/xhtml+xml', b'<html xmlns="http://www.w3.org/1999/xhtml"/>', False),
+                ('data.txt', 'text/plain', b'<script>treated as plain text</script>', True),
+                ('image.png', 'image/png', b'\x89PNG\r\n\x1a\n', True),
+            ]:
+                doc = server.RequestHandlerClass.runtime.ingestor.ingest(name, content, mime)['document']
+                response = urlopen(base + '/v1/documents/' + doc['id'] + '/source')
+                self.assertEqual(response.read(), content)
+                self.assertEqual(response.headers['X-Content-Type-Options'], 'nosniff')
+                self.assertIn('sandbox', response.headers['Content-Security-Policy'])
+                self.assertTrue(response.headers['Content-Disposition'].startswith('inline;' if inline else 'attachment;'))
+                self.assertEqual(response.headers['Content-Type'], mime if inline else 'application/octet-stream')
+        finally:
+            server.shutdown()
+            server.server_close()
+            worker.join()

@@ -8,7 +8,7 @@ A local-first workbench for building document extractors, comparing experiments,
 
 **Model-agnostic · Locally hostable · MIT licensed**
 
-[Quick start](#quick-start) · [How it works](#how-it-works) · [Configuration](docs/configuration.md) · [Contributing](CONTRIBUTING.md)
+[Quick start](#quick-start) · [How it works](#how-it-works) · [Configuration](docs/configuration.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 
 </div>
 
@@ -55,15 +55,17 @@ Demo mode uses labeled sample documents and scores. It makes no model calls. Nor
 
 ### Run your own workspace
 
-With Docker and Compose installed, run from this repository:
+With Docker and Compose installed:
 
 ```bash
+git clone https://github.com/jonmoubayed/ezpz-studio.git
+cd ezpz-studio
 docker compose up -d --build
 ```
 
 Open [ezpz studio](http://127.0.0.1:5180). The service includes the frontend, API, native PDF parser, and English OCR. Documents and results persist in a named Docker volume.
 
-Prebuilt ARM64 and AMD64 bundles also include the image: extract one and run `./start.sh` (macOS/Linux) or `./start.ps1` (Windows PowerShell). No source build or registry login is needed. See [deployment](docs/deployment.md) for credentials, alternate ports, backup/restore, and upgrades.
+The [beta checks workflow](https://github.com/jonmoubayed/ezpz-studio/actions/workflows/ci.yml) produces ARM64 and AMD64 bundles after successful checks. These bundles include the image: extract one and run `./start.sh` (macOS/Linux) or `./start.ps1` (Windows PowerShell). No source build or registry login is needed. See [deployment](docs/deployment.md) for credentials, alternate ports, backup/restore, and upgrades.
 
 To develop without Docker, use **Node.js 22.12+** and **Python 3.12**:
 
