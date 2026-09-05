@@ -40,8 +40,9 @@ async function mount() {
     );
   });
 }
-async function settle(check: () => boolean, name: string) {
-  for (let i = 0; i < 100; i++) {
+async function settle(check: () => boolean, name: string, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
     if (check()) return;
     await act(async () => {
       await new Promise((r) => setTimeout(r, 20));
@@ -155,6 +156,7 @@ await settle(
       (r) => r.name === "Store baseline" && r.status === "Completed",
     ),
   "background evaluation completes",
+  15_000, // Allow the real two-second polling loop to observe completion on CI.
 );
 const run = store!.runs.find((r) => r.name === "Store baseline")!;
 assert.ok(run?.id);
