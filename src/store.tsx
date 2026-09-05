@@ -68,7 +68,9 @@ function useStore() {
 
   const [page, setPageState] = useState<Page>(() => {
     try {
-      const page = decodeURIComponent(location.hash.slice(1)) as Page;
+      const page = decodeURIComponent(
+        location.hash.slice(1).split("/")[0],
+      ) as Page;
       return [
         "Overview",
         "Configuration",
@@ -245,6 +247,33 @@ function useStore() {
     navigate("Processors");
   }
   const selected = documents.find((d) => d.id === selectedId) || documents[0];
+  useEffect(() => {
+    const syncPage = () => {
+      try {
+        const next = decodeURIComponent(
+          location.hash.slice(1).split("/")[0],
+        ) as Page;
+        if (
+          [
+            "Overview",
+            "Playground",
+            "Configuration",
+            "Processors",
+            "Datasets",
+            "Evaluations",
+            "Hill climbing",
+            "Review queue",
+            "Settings",
+          ].includes(next)
+        )
+          setPageState(next);
+      } catch {
+        /* Keep the current page for malformed links. */
+      }
+    };
+    window.addEventListener("hashchange", syncPage);
+    return () => window.removeEventListener("hashchange", syncPage);
+  }, []);
   function navigate(p: Page) {
     setPageState(p);
     window.scrollTo({ top: 0, behavior: "instant" });
@@ -551,6 +580,30 @@ function useStore() {
       setBusy(false);
     }
   }
+  async function createEvaluationGroup(
+    name: string,
+    datasetId: string,
+    description: string,
+  ) {
+    if (mode === "demo") {
+      const group: EvalGroup = {
+        id: crypto.randomUUID(),
+        name,
+        datasetId,
+        description,
+      };
+      const next = [...evalGroups, group];
+      setEvalGroups(next);
+      localStorage.setItem("ezpz-redesign-groups", JSON.stringify(next));
+      return group;
+    }
+    const { eval_group } = await api.request("/eval-groups", {
+      method: "POST",
+      body: JSON.stringify({ name, dataset_id: datasetId, description }),
+    });
+    await refresh();
+    return { id: eval_group.id };
+  }
   async function benchmark(
     name: string,
     datasetId: string,
@@ -831,6 +884,7 @@ function useStore() {
     demo,
     resetDemo,
     refresh,
+    createEvaluationGroup,
     notifyError,
     updateDocument,
   };

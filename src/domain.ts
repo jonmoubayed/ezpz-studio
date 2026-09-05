@@ -46,7 +46,15 @@ export type Document = {
   runId?: string;
   warnings?: string[];
 };
+export type EvalExperiment = {
+  id: string;
+  name: string;
+  description?: string;
+  date: string;
+  config?: Config;
+};
 export type EvalGroup = {
+  experiments?: EvalExperiment[];
   id: string;
   name: string;
   datasetId: string;

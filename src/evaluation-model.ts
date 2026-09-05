@@ -100,3 +100,70 @@ export function scoreDelta(value: number | null, baseline: number | null) {
   const delta = (value - baseline) * 100;
   return `${delta > 0 ? "+" : ""}${delta.toFixed(1)} pts`;
 }
+
+// Experiments own a fixed configuration; repeated runs remain separate executions.
+export function groupExperiments(group: ReturnType<typeof groupRuns>[number]) {
+  const map = new Map(
+    (group.experiments || []).map((e) => [e.id, { ...e, runs: [] as Run[] }]),
+  );
+  for (const run of group.runs) {
+    const id = run.experimentId || `legacy:${run.id}`;
+    if (!map.has(id))
+      map.set(id, {
+        id,
+        name: run.name,
+        date: run.date,
+        config: run.config,
+        runs: [],
+      });
+    map.get(id)!.runs.push(run);
+  }
+  return [...map.values()]
+    .map((e) => ({
+      ...e,
+      runs: [...e.runs].sort((a, b) => a.date.localeCompare(b.date)),
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+export function configurationChanges(
+  config?: Run["config"],
+  baseline?: Run["config"],
+) {
+  if (!config || !baseline) return ["Configuration unavailable"];
+  const keys = [
+    ["provider", "Provider"],
+    ["model", "Model"],
+    ["parser", "Parser"],
+    ["prompt", "Prompt"],
+    ["schema", "Schema"],
+    ["baseUrl", "Endpoint"],
+  ] as const;
+  return keys
+    .filter(([key]) => config[key] !== baseline[key])
+    .map(([, label]) => label);
+}
+export function evaluationPath(
+  groupId?: string,
+  experimentId?: string,
+  runId?: string,
+) {
+  return (
+    "#Evaluations" +
+    (groupId ? `/group/${encodeURIComponent(groupId)}` : "") +
+    (experimentId ? `/experiment/${encodeURIComponent(experimentId)}` : "") +
+    (runId ? `/run/${encodeURIComponent(runId)}` : "")
+  );
+}
+export function parseEvaluationPath(hash: string) {
+  try {
+    const parts = hash.split("/").map(decodeURIComponent);
+    return {
+      groupId: parts[1] === "group" ? parts[2] : undefined,
+      experimentId: parts[3] === "experiment" ? parts[4] : undefined,
+      runId: parts[5] === "run" ? parts[6] : undefined,
+      compare: parts[3] === "compare",
+    };
+  } catch {
+    return {};
+  }
+}

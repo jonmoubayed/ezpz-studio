@@ -626,8 +626,8 @@ export function RunModal({
   const [error, setError] = useState("");
   return (
     <Modal
-      title="New evaluation run"
-      description="Test one configuration against a fixed benchmark."
+      title="New experiment"
+      description="Test a model, prompt, or schema change against this group’s benchmark. Reusing a saved configuration adds a run to its existing experiment."
       open={open}
       onClose={onClose}
       wide
@@ -655,6 +655,7 @@ export function RunModal({
         Evaluation group
         <FieldSelect
           value={group}
+          disabled={!!groupId}
           onValueChange={(value) => {
             setGroup(value);
             const g = s.evalGroups.find((g) => g.id === value);

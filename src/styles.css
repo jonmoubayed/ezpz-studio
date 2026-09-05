@@ -4904,3 +4904,211 @@ h1 {
 .structured-table .structured-text-column {
   min-width: 180px;
 }
+
+/* Evaluation hierarchy: directory → group → experiment → execution. */
+.evaluation-trail {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 18px;
+}
+.evaluation-trail > span {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.evaluation-trail a:hover {
+  color: var(--green);
+  text-decoration: underline;
+}
+.evaluation-trail [aria-current] {
+  color: var(--ink);
+}
+.evaluation-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface, white);
+  margin: 18px 0 24px;
+  overflow: hidden;
+}
+.evaluation-stats > div {
+  padding: 18px 20px;
+  min-width: 0;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.evaluation-stats > div:last-child {
+  border: 0;
+}
+.evaluation-stats span {
+  font-size: 12px;
+  color: var(--muted);
+}
+.evaluation-stats strong {
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.8px;
+}
+.evaluation-stats small {
+  font-size: 11px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.evaluation-context {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--muted);
+}
+.evaluation-context strong {
+  color: var(--ink);
+}
+.evaluation-section-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.evaluation-section-heading h2 {
+  font-size: 15px;
+  margin: 0;
+}
+.evaluation-section-heading p {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 5px 0 0;
+}
+.evaluation-baseline {
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.evaluation-baseline label {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.evaluation-baseline .field-select-trigger {
+  width: 260px;
+}
+.evaluation-group-link {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.evaluation-group-link small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.evaluation-group-link:hover strong {
+  text-decoration: underline;
+}
+.evaluation-directory .data-table {
+  min-width: 680px;
+}
+.evaluation-directory-note {
+  margin-top: 18px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.experiment-config {
+  margin-bottom: 24px;
+}
+.experiment-config-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 30px;
+  padding: 16px 20px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.experiment-config-meta strong {
+  color: var(--ink);
+  margin-left: 8px;
+  font-weight: 500;
+}
+.experiment-snapshots {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  padding: 0 20px 18px;
+}
+.experiment-snapshots details {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+  font-size: 12px;
+}
+.experiment-snapshots summary {
+  cursor: pointer;
+}
+.experiment-snapshots pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 360px;
+  overflow: auto;
+  margin-top: 12px;
+  font-size: 11px;
+}
+.eval-run-link svg {
+  display: inline;
+  vertical-align: middle;
+}
+@media (max-width: 760px) {
+  .evaluation-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .evaluation-stats > div {
+    border-bottom: 1px solid var(--border);
+    padding: 14px;
+  }
+  .evaluation-section-heading {
+    flex-wrap: wrap;
+    padding: 14px;
+  }
+  .experiment-snapshots {
+    grid-template-columns: 1fr;
+  }
+  .evaluation-baseline label {
+    flex-wrap: wrap;
+  }
+  .evaluation-trail {
+    font-size: 11px;
+  }
+}
+
+.evaluation-baseline label {
+  white-space: nowrap;
+}
+.evaluation-baseline .field-select-trigger {
+  max-width: 100%;
+  flex-shrink: 1;
+}
+
+.eval-field-name {
+  width: 100%;
+  text-align: left;
+}
+.eval-field .field-comparison {
+  margin-top: 10px;
+}
+@media (min-width: 1101px) {
+  .eval-inspector {
+    grid-template-columns: 150px minmax(0, 1fr) minmax(0, 1fr);
+  }
+}

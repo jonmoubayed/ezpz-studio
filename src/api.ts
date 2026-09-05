@@ -150,6 +150,15 @@ export async function loadWorkspace(signal = AbortSignal.timeout(15000)) {
       name: g.name,
       datasetId: g.dataset_id,
       description: g.description,
+      experiments: (g.experiments || []).map((e: any) => ({
+        id: e.id,
+        name: e.name,
+        description: e.description,
+        date: e.created_at,
+        config: e.processor_version
+          ? versionConfig(e.processor_version)
+          : undefined,
+      })),
     })) as EvalGroup[],
   };
 }

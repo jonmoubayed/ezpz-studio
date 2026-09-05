@@ -158,3 +158,32 @@ assert.equal(
 console.log(
   "PASS: saved processor metadata, version history, evaluation grouping, iteration snapshots, and repeated runs per configuration.",
 );
+
+const exactRepeat = await api.request("/runs", {
+  method: "POST",
+  body: JSON.stringify({
+    eval_experiment_id: candidate!.experimentId,
+    dataset_id: dataset.id,
+    metadata: { name: "Exact configuration rerun" },
+  }),
+});
+assert.equal(exactRepeat.run.eval_experiment_id, candidate!.experimentId);
+const hierarchyWorkspace = await api.loadWorkspace();
+const hierarchyGroup = hierarchyWorkspace.evalGroups.find(
+  (g) => g.id === candidate!.groupId,
+)!;
+assert.equal(hierarchyGroup.experiments!.length, 2);
+assert.equal(
+  hierarchyGroup.experiments!.find((e) => e.id === candidate!.experimentId)!
+    .config!.prompt,
+  revised.prompt,
+);
+assert.equal(
+  hierarchyWorkspace.runs.filter(
+    (r) => r.experimentId === candidate!.experimentId,
+  ).length,
+  3,
+);
+console.log(
+  "PASS: experiment names and fixed configs load with groups; exact reruns preserve experiment membership.",
+);

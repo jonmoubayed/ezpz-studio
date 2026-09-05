@@ -57,6 +57,17 @@ await settle(
 assert.equal(store!.mode, "live");
 assert.ok(store!.adapters?.llm.length);
 assert.ok(!store!.documents.some((d) => d.sample));
+await act(async () => {
+  location.hash = "#Evaluations/group/example/experiment/example";
+});
+await settle(
+  () => store!.page === "Evaluations",
+  "evaluation deep link navigation",
+);
+await act(async () => {
+  location.hash = "#Processors";
+});
+await settle(() => store!.page === "Processors", "browser hash navigation");
 const config = {
   ...defaultConfig,
   schema: JSON.stringify({
@@ -110,6 +121,22 @@ await api.request(`/documents/${documentId}/ground-truth`, {
   }),
 });
 const dataset = await api.createDataset("Store quality", [documentId]);
+let createdGroupId = "";
+await act(async () => {
+  const group = await store!.createEvaluationGroup(
+    "Separate group",
+    dataset.id,
+    "Track improvements",
+  );
+  createdGroupId = group.id;
+});
+assert.ok(
+  store!.evalGroups.some(
+    (g) => g.id === createdGroupId && g.experiments?.length === 0,
+  ),
+  "Creating a group does not require creating a run",
+);
+
 await act(async () => {
   await store!.refresh();
 });

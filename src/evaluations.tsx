@@ -1,10 +1,8 @@
+import { FieldValues } from "./expected-values";
 import { FieldSelect } from "./components/field-select";
 import { useEffect, useState } from "react";
 import {
-  ArrowLeft,
   ArrowRight,
-  Check,
-  ChevronDown,
   ChevronRight,
   Download,
   FileText,
@@ -14,20 +12,18 @@ import {
   Search,
   X,
 } from "lucide-react";
-import { Badge, Button, Busy, Empty, Heading } from "./ui";
+import { Badge, Button, Busy, Empty, Heading, Modal } from "./ui";
 import { RunModal, ModelMark } from "./pages";
 import { SourceViewer } from "./workbench";
 import { useStudio } from "./store";
-import {
-  displayValue,
-  downloadJson,
-  pct,
-  type Run,
-  type Document,
-} from "./domain";
+import { downloadJson, pct, type Run, type Document } from "./domain";
 import * as api from "./api";
 import {
   groupRuns,
+  groupExperiments,
+  configurationChanges,
+  evaluationPath,
+  parseEvaluationPath,
   evaluationDocuments,
   demoEvaluationDocuments,
   failed,
@@ -47,332 +43,801 @@ function Delta({ run, baseline }: { run: Run; baseline?: Run }) {
     </span>
   );
 }
-function Trend({ runs }: { runs: Run[] }) {
-  const scored = runs.filter((r) => r.score !== null);
-  if (!scored.length) return null;
-  const min = Math.max(0, Math.min(...scored.map((r) => r.score!)) - 0.04),
-    max = Math.min(1, Math.max(...scored.map((r) => r.score!)) + 0.04);
+function go(path: string) {
+  location.hash = path;
+  window.scrollTo({ top: 0, behavior: "instant" });
+}
+function representative(runs: Run[]) {
   return (
-    <svg
-      className="eval-sparkline"
-      viewBox="0 0 140 32"
-      role="img"
-      aria-label="Accuracy across iterations"
-    >
-      <polyline
-        points={scored
-          .map(
-            (r, i) =>
-              `${5 + (i * 130) / Math.max(1, scored.length - 1)},${28 - ((r.score! - min) / (max - min || 1)) * 24}`,
-          )
-          .join(" ")}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-      />
-      {scored.map((r, i) => (
-        <circle
-          key={r.id}
-          cx={5 + (i * 130) / Math.max(1, scored.length - 1)}
-          cy={28 - ((r.score! - min) / (max - min || 1)) * 24}
-          r="2.5"
-          fill="currentColor"
-        >
-          <title>
-            {r.name}: {pct(r.score)}
-          </title>
-        </circle>
+    [...runs].reverse().find((r) => r.status.toLowerCase() === "completed") ||
+    runs.at(-1)
+  );
+}
+function EvaluationTrail({
+  items,
+}: {
+  items: { label: string; path?: string }[];
+}) {
+  return (
+    <nav className="evaluation-trail" aria-label="Evaluation breadcrumbs">
+      <a href="#Evaluations">Evaluation groups</a>
+      {items.map((item, i) => (
+        <span key={i}>
+          <ChevronRight size={12} />
+          {item.path ? (
+            <a href={item.path}>{item.label}</a>
+          ) : (
+            <span aria-current="page">{item.label}</span>
+          )}
+        </span>
       ))}
-    </svg>
+    </nav>
+  );
+}
+function Stats({ items }: { items: [string, string, string][] }) {
+  return (
+    <div className="evaluation-stats">
+      {items.map(([label, value, note]) => (
+        <div key={label}>
+          <span>{label}</span>
+          <strong>{value}</strong>
+          <small>{note}</small>
+        </div>
+      ))}
+    </div>
   );
 }
 export function Evaluations() {
   const s = useStudio();
+  const [hash, setHash] = useState(location.hash);
   const [query, setQuery] = useState("");
-  const [collapsed, setCollapsed] = useState<string[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
-  const [baselines, setBaselines] = useState<Record<string, string>>({});
-  const [compare, setCompare] = useState(false);
-  const [newRun, setNewRun] = useState<{ groupId?: string } | null>(null);
-  const [detail, setDetail] = useState<Run | null>(null);
-  const groups = groupRuns(s.runs, s.evalGroups);
-  const chosen = selected
-    .map((id) => s.runs.find((r) => r.id === id))
+  const [newRun, setNewRun] = useState(false);
+  const [newGroup, setNewGroup] = useState(false);
+  const [baselineIds, setBaselineIds] = useState<Record<string, string>>({});
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    const sync = () => {
+      setHash(location.hash);
+      setSelected([]);
+      setQuery("");
+      setError("");
+      setNewRun(false);
+    };
+    window.addEventListener("hashchange", sync);
+    return () => window.removeEventListener("hashchange", sync);
+  }, []);
+  const route = parseEvaluationPath(hash);
+  const groups = groupRuns(
+    s.runs.filter((r) => !!r.datasetId),
+    s.evalGroups,
+  );
+  const group = groups.find((g) => g.id === route.groupId);
+  const experiments = group ? groupExperiments(group) : [];
+  const experiment = experiments.find((e) => e.id === route.experimentId);
+  const run = experiment?.runs.find((r) => r.id === route.runId);
+  const representatives = experiments
+    .map((e) => representative(e.runs))
     .filter((r): r is Run => !!r);
-  const comparable =
-    chosen.length >= 2 &&
-    chosen.every(
-      (r) =>
-        r.datasetId &&
-        r.datasetId === chosen[0].datasetId &&
-        r.groupId === chosen[0].groupId,
+  const baseline =
+    representatives.find((r) => r.id === baselineIds[group?.id || ""]) ||
+    representatives.find((r) => r.score !== null) ||
+    representatives[0];
+  const best = [...representatives]
+    .filter((r) => r.score !== null)
+    .sort((a, b) => b.score! - a.score!)[0];
+  const choose = (id: string) =>
+    setSelected((ids) =>
+      ids.includes(id)
+        ? ids.filter((v) => v !== id)
+        : ids.length < 4
+          ? [...ids, id]
+          : ids,
     );
-  if (detail)
+  const compareSelected = () =>
+    go(
+      `${evaluationPath(group!.id)}/compare/${selected.map(encodeURIComponent).join("/")}`,
+    );
+  const datasetName = group
+    ? s.datasets.find((d) => d.id === group.datasetId)?.name ||
+      group.runs[0]?.dataset ||
+      "Benchmark dataset"
+    : "";
+  const groupPath = group ? evaluationPath(group.id) : "#Evaluations";
+  if (
+    (route.groupId && !group) ||
+    (route.experimentId && !experiment) ||
+    (route.runId && !run)
+  )
     return (
-      <EvaluationResults
-        key={detail.id}
-        run={detail}
-        onBack={() => setDetail(null)}
-      />
+      <>
+        <EvaluationTrail items={[]} />
+        <Empty
+          title="Evaluation not found"
+          description="This group, experiment, or run is no longer in this workspace."
+          action={
+            <Button onClick={() => go("#Evaluations")}>Back to groups</Button>
+          }
+        />
+      </>
     );
+  if (group && experiment && run)
+    return (
+      <>
+        <EvaluationTrail
+          items={[
+            { label: group.name, path: groupPath },
+            {
+              label: experiment.name,
+              path: evaluationPath(group.id, experiment.id),
+            },
+            { label: `Run ${run.id.slice(-8)}` },
+          ]}
+        />
+        <EvaluationResults key={run.id} run={run} />
+      </>
+    );
+  if (group && route.compare) {
+    let ids: string[] = [];
+    try {
+      ids = hash.split("/").slice(4).map(decodeURIComponent);
+    } catch {
+      /* Invalid links render an empty state. */
+    }
+    const runs = [...new Set(ids)]
+      .map((id) =>
+        group.runs.find((r) => r.id === id && r.datasetId === group.datasetId),
+      )
+      .filter((r): r is Run => !!r)
+      .slice(0, 4);
+    return (
+      <div className="evaluations-page">
+        <EvaluationTrail
+          items={[
+            { label: group.name, path: groupPath },
+            { label: "Compare runs" },
+          ]}
+        />
+        <Heading
+          title="Compare experiments"
+          description={`${group.name} · ${datasetName}. Highlighted cells differ from the selected baseline.`}
+        />
+        {runs.length >= 2 ? (
+          <RunComparison
+            key={hash}
+            runs={runs}
+            onInspect={(r) =>
+              go(
+                evaluationPath(
+                  group.id,
+                  r.experimentId || `legacy:${r.id}`,
+                  r.id,
+                ),
+              )
+            }
+            onClose={() => go(groupPath)}
+          />
+        ) : (
+          <Empty
+            title="Select at least two runs"
+            description="Compare up to four runs from this evaluation group."
+            action={
+              <Button onClick={() => go(groupPath)}>Choose experiments</Button>
+            }
+          />
+        )}
+      </div>
+    );
+  }
+  if (group && experiment) {
+    const latest = representative(experiment.runs);
+    const config = experiment.config || latest?.config;
+    return (
+      <div className="evaluations-page">
+        <EvaluationTrail
+          items={[
+            { label: group.name, path: groupPath },
+            { label: experiment.name },
+          ]}
+        />
+        <Heading
+          eyebrow="EXPERIMENT"
+          title={experiment.name}
+          description={
+            experiment.description ||
+            "One saved configuration. Every execution below belongs to this experiment."
+          }
+          actions={
+            <Button
+              variant="primary"
+              disabled={
+                running ||
+                s.mode === "demo" ||
+                experiment.id.startsWith("legacy:")
+              }
+              onClick={async () => {
+                setRunning(true);
+                setError("");
+                try {
+                  const data = await api.request("/runs", {
+                    method: "POST",
+                    body: JSON.stringify({
+                      eval_experiment_id: experiment.id,
+                      dataset_id: group.datasetId,
+                      metadata: { name: experiment.name },
+                    }),
+                  });
+                  await s.refresh();
+                  if (data.run)
+                    go(evaluationPath(group.id, experiment.id, data.run.id));
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : String(e));
+                } finally {
+                  setRunning(false);
+                }
+              }}
+            >
+              {running ? (
+                <Busy label="Running…" />
+              ) : (
+                <>
+                  <Plus size={14} />
+                  Run again
+                </>
+              )}
+            </Button>
+          }
+        />
+        {error && (
+          <p className="form-error" role="alert">
+            {error}
+          </p>
+        )}
+        <Stats
+          items={[
+            [
+              "Latest accuracy",
+              pct(latest?.score ?? null),
+              "Latest completed execution",
+            ],
+            [
+              "Executions",
+              String(experiment.runs.length),
+              "Same saved configuration",
+            ],
+            [
+              "Average latency",
+              latest ? `${latest.latency.toFixed(1)}s` : "—",
+              "Per document · latest execution",
+            ],
+            [
+              "Total cost",
+              `$${experiment.runs.reduce((sum, r) => sum + r.cost, 0).toFixed(3)}`,
+              "Across this experiment’s runs",
+            ],
+          ]}
+        />
+        <section className="panel experiment-config">
+          <div className="evaluation-section-heading">
+            <div>
+              <h2>Configuration</h2>
+              <p>{datasetName} · Fixed benchmark</p>
+            </div>
+            <Badge>{config?.model || "Not recorded"}</Badge>
+          </div>
+          <div className="experiment-config-meta">
+            <span>
+              Provider <strong>{config?.provider || "—"}</strong>
+            </span>
+            <span>
+              Parser <strong>{config?.parser || "—"}</strong>
+            </span>
+            <span>
+              Changes vs baseline{" "}
+              <strong>
+                {latest?.id === baseline?.id
+                  ? "Baseline"
+                  : configurationChanges(config, baseline?.config).join(", ") ||
+                    "Same configuration"}
+              </strong>
+            </span>
+          </div>
+          <div className="experiment-snapshots">
+            {(["prompt", "schema"] as const).map((key) => (
+              <details key={key}>
+                <summary>
+                  {key === "prompt" ? "Extraction prompt" : "Extraction schema"}
+                </summary>
+                <pre>{config?.[key] || "Not recorded"}</pre>
+              </details>
+            ))}
+          </div>
+        </section>
+        <section className="panel">
+          <div className="evaluation-section-heading">
+            <div>
+              <h2>Runs</h2>
+              <p>
+                Inspect an execution to review documents, extracted values, and
+                expected values.
+              </p>
+            </div>
+            <Button disabled={selected.length < 2} onClick={compareSelected}>
+              <GitCompareArrows size={14} />
+              Compare runs{selected.length ? ` (${selected.length})` : ""}
+            </Button>
+          </div>
+          <div className="eval-table-scroll">
+            <table className="data-table eval-iteration-table">
+              <thead>
+                <tr>
+                  <th aria-label="Select runs" />
+                  <th>Execution</th>
+                  <th>Status</th>
+                  <th>Accuracy</th>
+                  <th>Latency</th>
+                  <th>Cost</th>
+                  <th>Documents</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...experiment.runs].reverse().map((r) => (
+                  <tr key={r.id}>
+                    <td>
+                      <input
+                        type="checkbox"
+                        aria-label={`Compare run ${r.id.slice(-8)}`}
+                        checked={selected.includes(r.id)}
+                        disabled={
+                          !selected.includes(r.id) && selected.length >= 4
+                        }
+                        onChange={() => choose(r.id)}
+                      />
+                    </td>
+                    <td>
+                      <a
+                        className="eval-run-link"
+                        href={evaluationPath(group.id, experiment.id, r.id)}
+                      >
+                        Run {r.id.slice(-8)} <ArrowRight size={12} />
+                      </a>
+                      <small>{new Date(r.date).toLocaleString()}</small>
+                    </td>
+                    <td>
+                      <Badge>{r.status}</Badge>
+                    </td>
+                    <td>
+                      <strong>{pct(r.score)}</strong>
+                    </td>
+                    <td>{r.latency.toFixed(1)}s</td>
+                    <td>${r.cost.toFixed(3)}</td>
+                    <td>{r.documents}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {!experiment.runs.length && (
+            <Empty
+              title="No runs yet"
+              description="Run this saved configuration to measure it against the group’s benchmark."
+            />
+          )}
+        </section>
+      </div>
+    );
+  }
   return (
     <div className="evaluations-page">
+      {group && <EvaluationTrail items={[{ label: group.name }]} />}
       <Heading
-        title="Evaluations"
-        description="Compare iterations. Find regressions. Inspect the fields behind the score."
+        eyebrow={group ? "EVALUATION GROUP" : undefined}
+        title={group?.name || "Evaluation groups"}
+        description={
+          group
+            ? group.description ||
+              "Compare experiments against one benchmark. Open an experiment to inspect its runs."
+            : "A dedicated benchmark for each process. Open a group to explore experiments and improvements."
+        }
         actions={
-          <>
-            <Button
-              onClick={() => downloadJson("evaluation-runs.json", s.runs)}
-            >
-              <Download size={14} />
-              Export
-            </Button>
-            <Button variant="primary" onClick={() => setNewRun({})}>
-              <Plus size={14} />
-              New evaluation
-            </Button>
-          </>
+          <Button
+            variant="primary"
+            onClick={() => (group ? setNewRun(true) : setNewGroup(true))}
+          >
+            <Plus size={14} />
+            {group ? "New experiment" : "New group"}
+          </Button>
         }
       />
-      <div className="eval-command-bar">
-        <div className="search-box">
-          <Search size={14} />
-          <input
-            aria-label="Search evaluation groups"
-            placeholder="Search groups, runs, or models…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
+      {group ? (
+        <>
+          <div className="evaluation-context">
+            <Layers size={14} />
+            <strong>{datasetName}</strong>
+            <span>
+              {s.datasets.find((d) => d.id === group.datasetId)?.count ?? "—"}{" "}
+              documents in current dataset
+            </span>
+            <Badge>Fixed benchmark</Badge>
+          </div>
+          <Stats
+            items={[
+              [
+                "Experiments",
+                String(experiments.length),
+                `${group.runs.length} total runs`,
+              ],
+              [
+                "Best accuracy",
+                pct(best?.score ?? null),
+                best
+                  ? experiments.find((e) =>
+                      e.runs.some((r) => r.id === best.id),
+                    )?.name || best.name
+                  : "No scored experiment yet",
+              ],
+              [
+                "Improvement",
+                scoreDelta(best?.score ?? null, baseline?.score ?? null),
+                "Best vs selected baseline",
+              ],
+              [
+                "Total cost",
+                `$${group.runs.reduce((sum, r) => sum + r.cost, 0).toFixed(3)}`,
+                "Across all runs in this group",
+              ],
+            ]}
           />
-        </div>
-        <span>
-          {groups.length} groups <span>·</span> {s.runs.length} runs
-        </span>
-        <Button disabled={!comparable} onClick={() => setCompare((v) => !v)}>
-          <GitCompareArrows size={14} />
-          {compare
-            ? "Hide comparison"
-            : `Compare${selected.length ? ` (${selected.length})` : ""}`}
+          <section className="panel">
+            <div className="evaluation-section-heading">
+              <div>
+                <h2>Experiments</h2>
+                <p>
+                  Metrics use each experiment’s latest completed run. Select 2–4
+                  to compare.
+                </p>
+              </div>
+              <Button disabled={selected.length < 2} onClick={compareSelected}>
+                <GitCompareArrows size={14} />
+                Compare{selected.length ? ` (${selected.length})` : ""}
+              </Button>
+            </div>
+            {!!representatives.length && (
+              <div className="evaluation-baseline">
+                <label>
+                  Baseline experiment{" "}
+                  <FieldSelect
+                    aria-label="Baseline experiment"
+                    value={baseline?.id || ""}
+                    onValueChange={(id) =>
+                      setBaselineIds({ ...baselineIds, [group.id]: id })
+                    }
+                    options={experiments.flatMap((e) => {
+                      const r = representative(e.runs);
+                      return r ? [{ value: r.id, label: e.name }] : [];
+                    })}
+                  />
+                </label>
+              </div>
+            )}
+            {!!experiments.length ? (
+              <div className="eval-table-scroll">
+                <table className="data-table eval-iteration-table">
+                  <thead>
+                    <tr>
+                      <th aria-label="Select experiments" />
+                      <th>Experiment</th>
+                      <th>Configuration / changes</th>
+                      <th>Accuracy</th>
+                      <th>Δ baseline</th>
+                      <th>Runs</th>
+                      <th />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...experiments].reverse().map((e) => {
+                      const r = representative(e.runs);
+                      const changes = configurationChanges(
+                        e.config || r?.config,
+                        baseline?.config,
+                      );
+                      return (
+                        <tr
+                          key={e.id}
+                          className={
+                            r && selected.includes(r.id) ? "is-selected" : ""
+                          }
+                        >
+                          <td>
+                            <input
+                              type="checkbox"
+                              aria-label={`Compare ${e.name}`}
+                              checked={!!r && selected.includes(r.id)}
+                              disabled={
+                                !r ||
+                                (!selected.includes(r.id) &&
+                                  selected.length >= 4)
+                              }
+                              onChange={() => r && choose(r.id)}
+                            />
+                          </td>
+                          <td>
+                            <a
+                              className="eval-run-link"
+                              href={evaluationPath(group.id, e.id)}
+                            >
+                              {e.name}
+                            </a>
+                            <small>
+                              {r ? r.status : "Not run"}
+                              {r?.id === best?.id && (
+                                <span className="eval-best-tag">Best</span>
+                              )}
+                              {r?.id === baseline?.id && (
+                                <span className="eval-best-tag">Baseline</span>
+                              )}
+                            </small>
+                          </td>
+                          <td>
+                            <span className="eval-model">
+                              <ModelMark
+                                provider={
+                                  e.config?.provider || r?.provider || "local"
+                                }
+                              />
+                              {e.config?.model || r?.model || "Not recorded"}
+                            </span>
+                            <small>
+                              {r?.id === baseline?.id
+                                ? "Reference configuration"
+                                : changes.length
+                                  ? `${changes.join(" + ")} changed`
+                                  : "Same configuration"}
+                            </small>
+                          </td>
+                          <td>
+                            <strong>{pct(r?.score ?? null)}</strong>
+                          </td>
+                          <td>
+                            {r ? <Delta run={r} baseline={baseline} /> : "—"}
+                          </td>
+                          <td>{e.runs.length}</td>
+                          <td>
+                            <a
+                              className="eval-inspect-button"
+                              href={evaluationPath(group.id, e.id)}
+                            >
+                              Open <ArrowRight size={12} />
+                            </a>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <Empty
+                title="Start the first experiment"
+                description="Choose a processor and test its model, prompt, and schema against this benchmark."
+                action={
+                  <Button onClick={() => setNewRun(true)}>
+                    New experiment
+                  </Button>
+                }
+              />
+            )}
+          </section>
+        </>
+      ) : (
+        <>
+          <div className="eval-command-bar">
+            <div className="search-box">
+              <Search size={14} />
+              <input
+                aria-label="Search evaluation groups"
+                placeholder="Find a group or benchmark…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </div>
+            <span>{groups.length} groups</span>
+          </div>
+          <section className="panel evaluation-directory">
+            <div className="eval-table-scroll">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Group / benchmark</th>
+                    <th>Experiments</th>
+                    <th>Runs</th>
+                    <th>Best accuracy</th>
+                    <th>Last run</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {groups
+                    .filter((g) =>
+                      `${g.name} ${s.datasets.find((d) => d.id === g.datasetId)?.name || ""}`
+                        .toLowerCase()
+                        .includes(query.toLowerCase()),
+                    )
+                    .map((g) => {
+                      const experiments = groupExperiments(g);
+                      const scored = experiments
+                        .map((e) => representative(e.runs))
+                        .filter((r): r is Run => !!r && r.score !== null);
+                      const best = scored.sort(
+                        (a, b) => b.score! - a.score!,
+                      )[0];
+                      return (
+                        <tr key={g.id}>
+                          <td>
+                            <a
+                              className="evaluation-group-link"
+                              href={evaluationPath(g.id)}
+                            >
+                              <span className="eval-group-icon">
+                                <Layers size={16} />
+                              </span>
+                              <span>
+                                <strong>{g.name}</strong>
+                                <small>
+                                  {s.datasets.find((d) => d.id === g.datasetId)
+                                    ?.name ||
+                                    g.runs[0]?.dataset ||
+                                    "Benchmark"}
+                                </small>
+                              </span>
+                            </a>
+                          </td>
+                          <td>{experiments.length}</td>
+                          <td>{g.runs.length}</td>
+                          <td>
+                            <strong>{pct(best?.score ?? null)}</strong>
+                          </td>
+                          <td>
+                            {g.runs.length
+                              ? new Date(
+                                  g.runs.at(-1)!.date,
+                                ).toLocaleDateString()
+                              : "No runs yet"}
+                          </td>
+                          <td>
+                            <a
+                              className="eval-inspect-button"
+                              href={evaluationPath(g.id)}
+                            >
+                              Open group <ArrowRight size={12} />
+                            </a>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+            {!groups.length ? (
+              <Empty
+                title="Create an evaluation group"
+                description="Choose a benchmark dataset, then track experiments for your extraction process."
+                action={
+                  <Button onClick={() => setNewGroup(true)}>New group</Button>
+                }
+              />
+            ) : (
+              query &&
+              !groups.some((g) =>
+                `${g.name} ${s.datasets.find((d) => d.id === g.datasetId)?.name || ""}`
+                  .toLowerCase()
+                  .includes(query.toLowerCase()),
+              ) && (
+                <Empty
+                  title="No matching groups"
+                  description="Try a different group or dataset name."
+                />
+              )
+            )}
+          </section>
+          <p className="evaluation-directory-note">
+            Group = shared benchmark · Experiment = one configuration · Run =
+            one execution and its results
+          </p>
+        </>
+      )}
+      {newRun && group && (
+        <RunModal
+          groupId={group.id.startsWith("ungrouped:") ? undefined : group.id}
+          open
+          onClose={() => setNewRun(false)}
+        />
+      )}
+      {newGroup && <NewEvaluationGroup onClose={() => setNewGroup(false)} />}
+    </div>
+  );
+}
+function NewEvaluationGroup({ onClose }: { onClose: () => void }) {
+  const s = useStudio();
+  const [name, setName] = useState("");
+  const [dataset, setDataset] = useState(s.datasets[0]?.id || "");
+  const [description, setDescription] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="New evaluation group"
+      description="Give this process a fixed benchmark. Experiments will live inside this group."
+    >
+      <label>
+        Group name
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="e.g. Invoice extraction"
+        />
+      </label>
+      <label>
+        Benchmark dataset
+        <FieldSelect
+          aria-label="Benchmark dataset"
+          value={dataset}
+          onValueChange={setDataset}
+          options={s.datasets.map((d) => ({
+            value: d.id,
+            label: `${d.name} (${d.count} documents)`,
+          }))}
+        />
+      </label>
+      {!s.datasets.length && (
+        <p className="form-hint">
+          Add a dataset with documents and ground truth from the Datasets page
+          first.
+        </p>
+      )}
+      <label>
+        Description
+        <textarea
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="What are you trying to improve?"
+        />
+      </label>
+      {error && (
+        <p role="alert" className="form-error">
+          {error}
+        </p>
+      )}
+      <div className="modal-actions">
+        <Button onClick={onClose}>Cancel</Button>
+        <Button
+          variant="primary"
+          disabled={saving || !name.trim() || !dataset}
+          onClick={async () => {
+            setSaving(true);
+            setError("");
+            try {
+              const g = await s.createEvaluationGroup(
+                name.trim(),
+                dataset,
+                description,
+              );
+              onClose();
+              go(evaluationPath(g.id));
+            } catch (e) {
+              setError(e instanceof Error ? e.message : String(e));
+            } finally {
+              setSaving(false);
+            }
+          }}
+        >
+          {saving ? <Busy label="Creating…" /> : "Create group"}
         </Button>
       </div>
-      {compare && comparable && (
-        <RunComparison
-          runs={chosen}
-          onInspect={setDetail}
-          onClose={() => setCompare(false)}
-        />
-      )}
-      <div className="eval-groups">
-        {groups
-          .filter((g) =>
-            `${g.name} ${g.runs.map((r) => r.name + " " + r.model).join(" ")}`
-              .toLowerCase()
-              .includes(query.toLowerCase()),
-          )
-          .map((g) => {
-            const baseline =
-              g.runs.find((r) => r.id === baselines[g.id]) ||
-              g.runs.find((r) => r.score !== null);
-            const best = [...g.runs]
-              .filter((r) => r.score !== null)
-              .sort((a, b) => b.score! - a.score!)[0];
-            const closed = collapsed.includes(g.id);
-            return (
-              <section className="eval-group" key={g.id}>
-                <div className="eval-group-header">
-                  <button
-                    className="eval-group-toggle"
-                    aria-expanded={!closed}
-                    onClick={() =>
-                      setCollapsed((ids) =>
-                        closed
-                          ? ids.filter((id) => id !== g.id)
-                          : [...ids, g.id],
-                      )
-                    }
-                  >
-                    {closed ? (
-                      <ChevronRight size={15} />
-                    ) : (
-                      <ChevronDown size={15} />
-                    )}
-                    <span className="eval-group-icon">
-                      <Layers size={16} />
-                    </span>
-                    <span>
-                      <strong>{g.name}</strong>
-                      <small>
-                        {s.datasets.find((d) => d.id === g.datasetId)?.name ||
-                          g.runs[0]?.dataset ||
-                          "Benchmark"}{" "}
-                        · {g.runs.length} iterations
-                      </small>
-                    </span>
-                  </button>
-                  <Trend runs={g.runs} />
-                  <div className="eval-best">
-                    <small>BEST ACCURACY</small>
-                    <strong>
-                      {pct(best?.score ?? null)}{" "}
-                      {best && <Delta run={best} baseline={baseline} />}
-                    </strong>
-                  </div>
-                  <Button
-                    onClick={() =>
-                      setNewRun({
-                        groupId: g.id.startsWith("ungrouped:")
-                          ? undefined
-                          : g.id,
-                      })
-                    }
-                  >
-                    <Plus size={13} />
-                    Iteration
-                  </Button>
-                </div>
-                {!closed && (
-                  <>
-                    <div className="eval-table-scroll">
-                      <table className="data-table eval-iteration-table">
-                        <thead>
-                          <tr>
-                            <th>
-                              <span className="sr-only">Compare</span>
-                            </th>
-                            <th>Iteration / hypothesis</th>
-                            <th>Configuration</th>
-                            <th>Accuracy</th>
-                            <th>Δ baseline</th>
-                            <th>Latency</th>
-                            <th>Cost</th>
-                            <th>Baseline</th>
-                            <th />
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {[...g.runs].reverse().map((r) => (
-                            <tr
-                              key={r.id}
-                              className={
-                                selected.includes(r.id) ? "is-selected" : ""
-                              }
-                            >
-                              <td>
-                                <input
-                                  type="checkbox"
-                                  aria-label={`Compare ${r.name}`}
-                                  checked={selected.includes(r.id)}
-                                  onChange={() => {
-                                    setCompare(false);
-                                    setSelected((ids) =>
-                                      ids.includes(r.id)
-                                        ? ids.filter((id) => id !== r.id)
-                                        : chosen.length &&
-                                            (chosen[0].groupId !== r.groupId ||
-                                              chosen[0].datasetId !==
-                                                r.datasetId)
-                                          ? [r.id]
-                                          : [...ids.slice(-3), r.id],
-                                    );
-                                  }}
-                                />
-                              </td>
-                              <td>
-                                <button
-                                  className="eval-run-link"
-                                  onClick={() => setDetail(r)}
-                                >
-                                  {r.name}
-                                </button>
-                                <small>
-                                  {new Date(r.date).toLocaleDateString(
-                                    undefined,
-                                    { month: "short", day: "numeric" },
-                                  )}{" "}
-                                  · {r.status}{" "}
-                                  {r.id === best?.id && (
-                                    <span className="eval-best-tag">Best</span>
-                                  )}
-                                </small>
-                              </td>
-                              <td>
-                                <span className="eval-model">
-                                  <ModelMark provider={r.provider} />
-                                  {r.model}
-                                </span>
-                                <small>
-                                  {r.config?.parser || "Parser unavailable"} · v
-                                  {r.version}
-                                </small>
-                              </td>
-                              <td>
-                                <strong>{pct(r.score)}</strong>
-                              </td>
-                              <td>
-                                <Delta run={r} baseline={baseline} />
-                              </td>
-                              <td>{r.latency.toFixed(1)}s</td>
-                              <td>${r.cost.toFixed(3)}</td>
-                              <td>
-                                <input
-                                  type="radio"
-                                  name={`baseline-${g.id}`}
-                                  aria-label={`Use ${r.name} as baseline`}
-                                  checked={baseline?.id === r.id}
-                                  onChange={() =>
-                                    setBaselines({ ...baselines, [g.id]: r.id })
-                                  }
-                                />
-                              </td>
-                              <td>
-                                <button
-                                  className="eval-inspect-button"
-                                  onClick={() => setDetail(r)}
-                                >
-                                  Inspect <ArrowRight size={12} />
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                    {!g.runs.length && (
-                      <Empty
-                        title="Ready for your first iteration"
-                        description="Run a configuration against this group's benchmark."
-                      />
-                    )}
-                    <div className="eval-group-footer">
-                      <span>
-                        Baseline: {baseline?.name || "No scored run yet"}
-                      </span>
-                      <span>
-                        Select 2–4 iterations to compare configurations.
-                      </span>
-                    </div>
-                  </>
-                )}
-              </section>
-            );
-          })}
-      </div>
-      {!groups.length && (
-        <Empty
-          title="Start an evaluation group"
-          description="Give a process a benchmark, then compare model and prompt iterations."
-          action={<Button onClick={() => setNewRun({})}>New evaluation</Button>}
-        />
-      )}
-      {newRun && (
-        <RunModal
-          key={newRun.groupId || "new"}
-          groupId={newRun.groupId}
-          open
-          onClose={() => setNewRun(null)}
-        />
-      )}
-    </div>
+    </Modal>
   );
 }
 function RunComparison({
@@ -397,6 +862,8 @@ function RunComparison({
     ["Model", (r) => r.model],
     ["Provider", (r) => r.provider],
     ["Parser", (r) => r.config?.parser || "Not recorded"],
+    ["Documents", (r) => String(r.documents)],
+    ["Status", (r) => r.status],
     ["Latency", (r) => `${r.latency.toFixed(1)}s`],
     ["Cost", (r) => `$${r.cost.toFixed(3)}`],
     ["Prompt", (r) => r.config?.prompt || "Not recorded"],
@@ -433,6 +900,9 @@ function RunComparison({
                     {r.name}
                     <ArrowRight size={12} />
                   </button>
+                  <small>
+                    Run {r.id.slice(-8)} · {new Date(r.date).toLocaleString()}
+                  </small>
                 </th>
               ))}
             </tr>
@@ -472,7 +942,7 @@ function RunComparison({
     </section>
   );
 }
-function EvaluationResults({ run, onBack }: { run: Run; onBack: () => void }) {
+function EvaluationResults({ run }: { run: Run }) {
   const s = useStudio();
   const [docs, setDocs] = useState<Document[]>(
     s.mode === "demo" ? demoEvaluationDocuments(run) : [],
@@ -535,19 +1005,9 @@ function EvaluationResults({ run, onBack }: { run: Run; onBack: () => void }) {
   const active = fields.find((f) => f.key === fieldKey) || fields[0];
   return (
     <div className="evaluation-results-page">
-      <div className="eval-result-back">
-        <button onClick={onBack}>
-          <ArrowLeft size={14} />
-          Evaluations
-        </button>
-        <span>/ {run.groupName || run.dataset}</span>
-        <Badge>
-          {s.mode === "demo" ? "Illustrative sample" : "Saved evaluation"}
-        </Badge>
-      </div>
       <Heading
-        title={run.name}
-        description={`${run.model} · ${run.config?.parser || "Saved configuration"} · ${run.documents} documents`}
+        title={`Run ${run.id.slice(-8)}`}
+        description={`${run.name} · ${run.model} · ${run.config?.parser || "Saved configuration"} · ${run.documents} documents`}
         actions={
           <>
             <Button
@@ -717,12 +1177,16 @@ function EvaluationResults({ run, onBack }: { run: Run; onBack: () => void }) {
                 </div>
                 <div className="eval-field-list">
                   {fields.map((f) => (
-                    <button
+                    <article
                       className={`eval-field ${active?.key === f.key ? "active" : ""} ${failed(f) ? "is-failed" : ""}`}
                       key={f.key}
                       onClick={() => setFieldKey(f.key)}
                     >
-                      <span className="eval-field-name">
+                      <button
+                        className="eval-field-name"
+                        aria-label={`Inspect source for ${f.key}`}
+                        onClick={() => setFieldKey(f.key)}
+                      >
                         <strong>{f.key}</strong>
                         <Badge
                           tone={
@@ -735,28 +1199,15 @@ function EvaluationResults({ run, onBack }: { run: Run; onBack: () => void }) {
                         >
                           {f.status?.replaceAll("_", " ") || "unscored"}
                         </Badge>
-                      </span>
-                      <span className="eval-field-values">
-                        <span>
-                          <small>EXTRACTED</small>
-                          <code>{displayValue(f.value)}</code>
-                        </span>
-                        <span>
-                          <small>EXPECTED</small>
-                          <code>
-                            {f.status === "unscored"
-                              ? "Not annotated"
-                              : displayValue(f.expected)}
-                          </code>
-                        </span>
-                      </span>
+                      </button>
+                      <FieldValues field={f} />
                       {f.area && (
                         <span className="eval-field-citation">
                           View source · page {f.page || 1}
                           <ArrowRight size={11} />
                         </span>
                       )}
-                    </button>
+                    </article>
                   ))}
                 </div>
               </section>
