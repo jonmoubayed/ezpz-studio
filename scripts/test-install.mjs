@@ -37,7 +37,9 @@ try {
   let ready = false;
   for (let attempt = 0; attempt < 100; attempt++) {
     try {
-      if ((await fetch(base + "/v1/ready")).ok) {ready = true; break;}
+      const response = await fetch(base + "/v1/ready");
+      await response.arrayBuffer();
+      if (response.ok) {ready = true; break;}
     } catch {}
     await new Promise(resolve => setTimeout(resolve, 200));
   }

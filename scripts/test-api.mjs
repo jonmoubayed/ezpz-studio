@@ -35,6 +35,7 @@ async function waitFor(url) {
   for (let i = 0; i < 100; i++) {
     try {
       const response = await fetch(url);
+      await response.arrayBuffer();
       if (response.ok) return;
     } catch {}
     await new Promise((r) => setTimeout(r, 100));

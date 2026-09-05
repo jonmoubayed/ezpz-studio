@@ -33,7 +33,9 @@ const docker = (...args) => command("docker", args);
 async function ready(base) {
   for (let i = 0; i < 100; i++) {
     try {
-      if ((await fetch(`${base}/v1/ready`)).ok) return;
+      const response = await fetch(`${base}/v1/ready`);
+      await response.arrayBuffer();
+      if (response.ok) return;
     } catch {}
     await new Promise((r) => setTimeout(r, 200));
   }
@@ -85,13 +87,16 @@ try {
     "/%2eenv",
   ]) {
     const response = await fetch(base + file);
+    await response.arrayBuffer();
     if (![403, 404].includes(response.status))
       throw new Error(`Private file path was not denied: ${file}`);
   }
   for (const asset of [
     ...html.matchAll(/(?:src|href)="([^" ]+\.(?:js|css))"/g),
   ].map((m) => m[1])) {
-    if (!(await fetch(new URL(asset, base))).ok)
+    const response = await fetch(new URL(asset, base));
+    const bytes = await response.arrayBuffer();
+    if (!response.ok || bytes.byteLength === 0)
       throw new Error(`Packaged asset missing: ${asset}`);
   }
   console.log(
@@ -169,7 +174,9 @@ try {
     throw new Error("Restored workspace differs from the stopped backup");
   const docs = after.documents.documents;
   for (const doc of docs) {
-    if (!(await fetch(`${restoredBase}/v1/documents/${doc.id}/source`)).ok)
+    const response = await fetch(`${restoredBase}/v1/documents/${doc.id}/source`);
+    const bytes = await response.arrayBuffer();
+    if (!response.ok || bytes.byteLength !== doc.size_bytes)
       throw new Error("Restored document blob is missing");
   }
   console.log(
