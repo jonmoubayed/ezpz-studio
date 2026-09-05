@@ -1297,6 +1297,24 @@ export function Settings() {
               <Button onClick={s.resetDemo}>Reset demo</Button>
             )}
           </div>
+          <div className="settings-buttons">
+            <Button
+              disabled={s.busy}
+              title="Clear browser working copies and selections. Saved backend data is unaffected."
+              onClick={() => {
+                for (const key of Object.keys(localStorage)) {
+                  if (
+                    key.startsWith("ezpz-live-") ||
+                    key.startsWith("ezpz-redesign-")
+                  )
+                    localStorage.removeItem(key);
+                }
+                location.assign(location.pathname);
+              }}
+            >
+              Clear browser drafts
+            </Button>
+          </div>
           <div className="privacy-note">
             <ShieldCheck size={18} />
             <p>
