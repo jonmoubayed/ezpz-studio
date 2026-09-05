@@ -1,12 +1,9 @@
 import { FieldSelect } from "./components/field-select";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
-  ArrowLeft,
   Braces,
   Check,
   Code2,
-  FileScan,
-  Plus,
   Download,
   Focus,
   ChevronDown,
@@ -23,7 +20,7 @@ import { ConfigForm } from "./pages";
 import { useStudio } from "./store";
 import { Badge, Button, Busy, Empty, Heading } from "./ui";
 
-import { SourceViewer } from "./workbench";
+import { WorkbenchControls, WorkbenchSource } from "./workbench";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "./components/ui/tabs";
 import {
   displayValue,
@@ -35,6 +32,8 @@ import {
 type Preview = { document: SourceDocument; config: Config; demo: boolean };
 export function Configuration() {
   const s = useStudio();
+  const settings = useRef<HTMLDetailsElement>(null);
+  const schemaSection = useRef<HTMLElement>(null);
   const [pane, setPane] = useState("configure");
   const [previews, setPreviews] = useState<Record<string, Preview>>({});
   const [running, setRunning] = useState(false);
@@ -141,28 +140,6 @@ export function Configuration() {
   };
   return (
     <div className="configuration-page">
-      <div className="configuration-trail">
-        <button
-          onClick={() =>
-            s.navigate(s.activeProcessor ? "Processors" : "Playground")
-          }
-        >
-          <ArrowLeft size={14} />{" "}
-          {s.activeProcessor ? "Processors" : "Playground"}
-        </button>
-        <span>/</span>
-        <span>Edit configuration</span>
-        <Badge tone={valid ? "green" : "orange"}>
-          {valid ? (
-            <>
-              <Check size={12} />{" "}
-              {s.activeProcessor ? "Local working copy" : "Saved locally"}
-            </>
-          ) : (
-            "Unsaved schema changes"
-          )}
-        </Badge>
-      </div>
       <Heading
         title={
           s.activeProcessor
@@ -203,13 +180,45 @@ export function Configuration() {
           </>
         }
       />
-      <div className="processor-workspace">
+      <WorkbenchControls
+        status={!valid ? "Unsaved schema changes" : "Working configuration"}
+        onConfigure={() => {
+          setPane("configure");
+          if (settings.current) settings.current.open = true;
+        }}
+        onSchema={() => {
+          setPane("configure");
+          if (settings.current) settings.current.open = false;
+          requestAnimationFrame(() =>
+            schemaSection.current?.scrollIntoView({ block: "nearest" }),
+          );
+        }}
+      />
+      <div className="workbench-layout processor-workspace">
+        <WorkbenchSource
+          document={source}
+          field={field}
+          label="Processor source document"
+          onDocumentChange={() => {
+            setActiveField("");
+            setPreviewError("");
+          }}
+        />
         <Tabs
           value={pane}
           onValueChange={setPane}
-          className="processor-workspace-editor"
+          className="results-pane processor-workspace-editor"
         >
-          <div className="processor-pane-tabs">
+          <div className="pane-heading">
+            <span className="results-title">
+              <Braces size={17} />
+              Processor workspace
+            </span>
+            <Badge>
+              {s.activeProcessor ? `v${s.activeProcessor.version}` : "Draft"}
+            </Badge>
+          </div>
+          <div className="processor-pane-tabs results-tabs">
             <TabsList aria-label="Processor workspace">
               <TabsTrigger value="configure">
                 <Settings2 size={14} />
@@ -221,9 +230,6 @@ export function Configuration() {
                 {preview && <span>{preview.document.fields.length}</span>}
               </TabsTrigger>
             </TabsList>
-            <span>
-              {running ? "Running extraction…" : "Build → test → refine"}
-            </span>
           </div>
           <TabsContent
             value="configure"
@@ -290,7 +296,10 @@ export function Configuration() {
             )}
             <div className="configuration-layout">
               <div className="configuration-sections">
-                <details className="configuration-card processor-extraction-settings">
+                <details
+                  ref={settings}
+                  className="configuration-card processor-extraction-settings"
+                >
                   <summary className="configuration-section-title">
                     <span className="configuration-section-icon">
                       <Settings2 size={17} />
@@ -309,7 +318,10 @@ export function Configuration() {
                     showSchema={false}
                   />
                 </details>
-                <section className="configuration-card schema-card">
+                <section
+                  ref={schemaSection}
+                  className="configuration-card schema-card"
+                >
                   <div className="configuration-section-title">
                     <span className="configuration-section-icon">
                       <Braces size={18} />
@@ -446,62 +458,6 @@ export function Configuration() {
             )}
           </TabsContent>
         </Tabs>
-        <section
-          className="source-pane processor-build-source"
-          aria-label="Processor source document"
-        >
-          <div className="pane-heading">
-            <FileScan size={15} />
-            <FieldSelect
-              aria-label="Processor source document"
-              value={source?.id || ""}
-              disabled={running}
-              onValueChange={(value) => {
-                const selected = s.documents.find((d) => d.id === value);
-                if (selected) s.selectDocument(selected);
-                setActiveField("");
-                setPreviewError("");
-              }}
-              options={s.documents.map((d) => ({ value: d.id, label: d.name }))}
-            />
-            <Button
-              title="Upload source document"
-              disabled={s.busy}
-              onClick={() => s.setUploadOpen(true)}
-            >
-              <Plus size={14} />
-            </Button>
-          </div>
-          {source ? (
-            <SourceViewer document={source} field={field} />
-          ) : (
-            <Empty
-              title="Add a test document"
-              description="Keep the source beside your schema as you build."
-              action={
-                <Button onClick={() => s.setUploadOpen(true)}>
-                  <Plus size={14} />
-                  Add document
-                </Button>
-              }
-            />
-          )}
-          <div className="source-footer">
-            <span>
-              <Focus size={12} />
-              {field?.area
-                ? `${field.key} · page ${field.page || 1}`
-                : "Source document"}
-            </span>
-            {source && (
-              <a href={source.src} download={source.name}>
-                <Download size={12} />
-                Download
-              </a>
-            )}
-            <span>Extend UI</span>
-          </div>
-        </section>
       </div>
     </div>
   );

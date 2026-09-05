@@ -275,7 +275,7 @@ export default function App() {
         </header>
         <main
           id="main"
-          className={`main-content ${s.page === "Playground" || s.page === "Review queue" ? "workbench-main" : ""}`}
+          className={`main-content ${s.page === "Playground" || s.page === "Configuration" || s.page === "Review queue" ? "workbench-main" : ""}`}
         >
           {s.message && (
             <Notice onClose={() => s.setMessage("")}>{s.message}</Notice>

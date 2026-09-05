@@ -130,12 +130,194 @@ export function SourceViewer({
     </div>
   );
 }
+export function WorkbenchControls({
+  onConfigure,
+  onSchema,
+  status,
+}: {
+  onConfigure: () => void;
+  onSchema: () => void;
+  status?: string;
+}) {
+  const s = useStudio();
+  return (
+    <>
+      <div className="playground-processor">
+        <label>
+          Processor
+          <FieldSelect
+            aria-label="Playground processor"
+            disabled={s.busy}
+            value={s.activeProcessor?.id || ""}
+            onValueChange={(value) => {
+              const p = s.processors.find((p) => p.id === value);
+              if (p) s.chooseProcessor(p);
+            }}
+            options={[
+              { value: "", label: "Unsaved configuration", disabled: true },
+              ...s.processors.map((p) => ({
+                value: p.id,
+                label: p.name + " · v" + p.version,
+              })),
+            ]}
+          />
+        </label>
+        <button onClick={s.saveAsProcessor}>Save as processor</button>
+        <button onClick={() => s.navigate("Processors")}>
+          Manage processors <ArrowRight size={12} />
+        </button>
+      </div>
+      <div className="workbench-config">
+        <div>
+          <button className="config-step" onClick={onConfigure}>
+            <span>01</span>
+            <FileScan size={14} />
+            {s.config.parser === "native" ? "Native text" : s.config.parser}
+          </button>
+          <ChevronRight size={13} />
+          <button className="config-step" onClick={onConfigure}>
+            <span>02</span>
+            <ModelMark provider={s.config.provider} />
+            {s.config.model}
+            <ChevronDown size={12} />
+          </button>
+          <ChevronRight size={13} />
+          <button className="config-step" onClick={onSchema}>
+            <span>03</span>
+            <Braces size={14} />
+            Output schema
+          </button>
+        </div>
+        <Badge tone={s.mode === "demo" ? "orange" : "green"}>
+          {status ||
+            (s.mode === "demo" ? "Sample fixture" : "Live configuration")}
+        </Badge>
+      </div>
+    </>
+  );
+}
+
+export function WorkbenchSource({
+  document: d,
+  field,
+  label = "Source document",
+  onDocumentChange,
+}: {
+  document?: Document;
+  field?: Field;
+  label?: string;
+  onDocumentChange?: () => void;
+}) {
+  const s = useStudio();
+  const [filesOpen, setFilesOpen] = useState(false);
+  const [q, setQ] = useState("");
+  return (
+    <>
+      <section className="source-pane" aria-label={label}>
+        <div className="pane-heading">
+          <button
+            className="source-selector"
+            disabled={s.busy}
+            onClick={() => setFilesOpen(true)}
+          >
+            <span className="pdf-icon">
+              <FileText size={16} />
+            </span>
+            <strong>{d?.name || "Choose a source document"}</strong>
+            <ChevronDown size={14} />
+          </button>
+          <button
+            className="icon-button"
+            aria-label="Upload document"
+            disabled={s.busy}
+            onClick={() => s.setUploadOpen(true)}
+          >
+            <Plus size={17} />
+          </button>
+        </div>
+        {d ? (
+          <SourceViewer document={d} field={field} />
+        ) : (
+          <Empty
+            title="Add a test document"
+            description="Keep the source beside your schema as you build."
+            action={
+              <Button onClick={() => s.setUploadOpen(true)}>
+                <Plus size={15} />
+                Add document
+              </Button>
+            }
+          />
+        )}
+        <div className="source-footer">
+          <span>
+            <ShieldCheck size={13} />
+            Original source
+          </span>
+          {d && (
+            <a href={d.src} download={d.name}>
+              <Download size={13} />
+              Download
+            </a>
+          )}
+          <span>Viewer by Extend UI</span>
+        </div>
+      </section>
+      <Modal
+        title="Choose a source document"
+        description="Inspect an existing document or add a new one."
+        open={filesOpen}
+        onClose={() => setFilesOpen(false)}
+      >
+        <div className="search-box">
+          <Search size={16} />
+          <input
+            aria-label="Find source document"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Find a document…"
+          />
+        </div>
+        <div className="command-results">
+          {s.documents
+            .filter((x) => x.name.toLowerCase().includes(q.toLowerCase()))
+            .map((x) => (
+              <button
+                key={x.id}
+                onClick={() => {
+                  s.selectDocument(x);
+                  setFilesOpen(false);
+                  onDocumentChange?.();
+                }}
+              >
+                <FileText size={16} />
+                {x.name}
+                {d?.id === x.id ? (
+                  <Check size={15} />
+                ) : (
+                  <ArrowRight size={15} />
+                )}
+              </button>
+            ))}
+        </div>
+        <Button
+          onClick={() => {
+            setFilesOpen(false);
+            s.setUploadOpen(true);
+          }}
+        >
+          <Plus size={14} />
+          Add documents
+        </Button>
+      </Modal>
+    </>
+  );
+}
+
 export function Playground() {
   const s = useStudio();
   const [tab, setTab] = useState("Fields");
   const [active, setActive] = useState("invoice_number");
-  const [filesOpen, setFilesOpen] = useState(false);
-  const [q, setQ] = useState("");
   const [groundTruthOpen, setGroundTruthOpen] = useState(false);
   const [groundTruth, setGroundTruth] = useState("");
   const [error, setError] = useState("");
@@ -197,64 +379,10 @@ export function Playground() {
           </>
         }
       />
-      <div className="playground-processor">
-        <label>
-          Processor
-          <FieldSelect
-            aria-label="Playground processor"
-            value={s.activeProcessor?.id || ""}
-            onValueChange={(value) => {
-              const p = s.processors.find((p) => p.id === value);
-              if (p) s.chooseProcessor(p);
-            }}
-            options={[
-              { value: "", label: "Unsaved configuration", disabled: true },
-              ...s.processors.map((p) => ({
-                value: p.id,
-                label: p.name + " · v" + p.version,
-              })),
-            ]}
-          />
-        </label>
-        <button onClick={s.saveAsProcessor}>Save as processor</button>
-        <button onClick={() => s.navigate("Processors")}>
-          Manage processors <ArrowRight size={12} />
-        </button>
-      </div>
-      <div className="workbench-config">
-        <div>
-          <span className="config-step">
-            <span>01</span>
-            <FileScan size={14} />
-            {s.config.parser === "native" ? "Native text" : s.config.parser}
-          </span>
-          <ChevronRight size={13} />
-          <button
-            className="config-step"
-            onClick={() => s.navigate("Configuration")}
-          >
-            <span>02</span>
-            <ModelMark provider={s.config.provider} />
-            {s.config.model}
-            <ChevronDown size={12} />
-          </button>
-          <ChevronRight size={13} />
-          <button
-            className="config-step"
-            onClick={() => {
-              setTab("Schema");
-              s.navigate("Configuration");
-            }}
-          >
-            <span>03</span>
-            <Braces size={14} />
-            Output schema
-          </button>
-        </div>
-        <Badge tone={s.mode === "demo" ? "orange" : "green"}>
-          {s.mode === "demo" ? "Sample fixture" : "Live configuration"}
-        </Badge>
-      </div>
+      <WorkbenchControls
+        onConfigure={() => s.navigate("Configuration")}
+        onSchema={() => s.navigate("Configuration")}
+      />
       {!d ? (
         <Empty
           title="A blank page, full of possibilities."
@@ -268,39 +396,7 @@ export function Playground() {
         />
       ) : (
         <div className="workbench-layout">
-          <section className="source-pane">
-            <div className="pane-heading">
-              <button
-                className="source-selector"
-                onClick={() => setFilesOpen(true)}
-              >
-                <span className="pdf-icon">
-                  <FileText size={16} />
-                </span>
-                <strong>{d.name}</strong>
-                <ChevronDown size={14} />
-              </button>
-              <button
-                className="icon-button"
-                aria-label="Upload document"
-                onClick={() => s.setUploadOpen(true)}
-              >
-                <Plus size={17} />
-              </button>
-            </div>
-            <SourceViewer document={d} field={field} />
-            <div className="source-footer">
-              <span>
-                <ShieldCheck size={13} />
-                Original source
-              </span>
-              <a href={d.src} download={d.name}>
-                <Download size={13} />
-                Download
-              </a>
-              <span>Viewer by Extend UI</span>
-            </div>
-          </section>
+          <WorkbenchSource document={d} field={field} />
           <section className="results-pane">
             <div className="pane-heading">
               <span className="results-title">
@@ -457,52 +553,6 @@ export function Playground() {
           </section>
         </div>
       )}
-      <Modal
-        title="Choose a source document"
-        description="Inspect an existing document or add a new one."
-        open={filesOpen}
-        onClose={() => setFilesOpen(false)}
-      >
-        <div className="search-box">
-          <Search size={16} />
-          <input
-            aria-label="Find source document"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Find a document…"
-          />
-        </div>
-        <div className="command-results">
-          {s.documents
-            .filter((x) => x.name.toLowerCase().includes(q.toLowerCase()))
-            .map((x) => (
-              <button
-                key={x.id}
-                onClick={() => {
-                  s.selectDocument(x);
-                  setFilesOpen(false);
-                }}
-              >
-                <FileText size={16} />
-                {x.name}
-                {d?.id === x.id ? (
-                  <Check size={15} />
-                ) : (
-                  <ArrowRight size={15} />
-                )}
-              </button>
-            ))}
-        </div>
-        <Button
-          onClick={() => {
-            setFilesOpen(false);
-            s.setUploadOpen(true);
-          }}
-        >
-          <Plus size={14} />
-          Add documents
-        </Button>
-      </Modal>
       <Modal
         title="Document ground truth"
         description="Use the source to provide expected values for future evaluations."
