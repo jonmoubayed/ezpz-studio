@@ -58,6 +58,10 @@ export function evaluationDocuments(
             ? score.actual
             : (prediction?.value ?? null),
         expected: score?.expected ?? null,
+        hasExpected:
+          !!score &&
+          Object.hasOwn(score, "expected") &&
+          score.status !== "unscored",
         status: score?.status || "unscored",
       } as Field;
     });

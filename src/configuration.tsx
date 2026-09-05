@@ -1,3 +1,5 @@
+import { ExpectedValuesEditor, FieldValues } from "./expected-values";
+import { withExpectedValues } from "./result-model";
 import { FieldSelect } from "./components/field-select";
 import { useRef, useState } from "react";
 import {
@@ -23,7 +25,6 @@ import { Badge, Button, Busy, Empty, Heading } from "./ui";
 import { WorkbenchControls, WorkbenchSource } from "./workbench";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "./components/ui/tabs";
 import {
-  displayValue,
   downloadJson,
   type Document as SourceDocument,
   type Config,
@@ -474,6 +475,11 @@ function ProcessorPreview({
   activeField: string;
   onField: (key: string) => void;
 }) {
+  const s = useStudio();
+  const latest = s.documents.find((d) => d.id === preview.document.id);
+  const resultDocument = latest?.groundTruth
+    ? withExpectedValues(preview.document, latest.groundTruth)
+    : preview.document;
   const [view, setView] = useState("fields");
   const output = Object.fromEntries(
     preview.document.fields.map((f) => [f.key, f.value]),
@@ -525,10 +531,11 @@ function ProcessorPreview({
         <TabsList aria-label="Extraction output format">
           <TabsTrigger value="fields">Fields</TabsTrigger>
           <TabsTrigger value="json">JSON</TabsTrigger>
+          <TabsTrigger value="expected">Expected</TabsTrigger>
         </TabsList>
         <TabsContent value="fields">
           <div className="processor-preview-fields">
-            {preview.document.fields.map((f) => (
+            {resultDocument.fields.map((f) => (
               <button
                 className={`processor-preview-field ${activeField === f.key ? "active" : ""}`}
                 key={f.key}
@@ -540,7 +547,7 @@ function ProcessorPreview({
                     {Math.round(f.confidence * 100)}%
                   </Badge>
                 </span>
-                <code>{displayValue(f.value)}</code>
+                <FieldValues field={f} />
                 <small>
                   {f.area ? (
                     <>
@@ -560,6 +567,12 @@ function ProcessorPreview({
               />
             )}
           </div>
+        </TabsContent>
+        <TabsContent value="expected">
+          <ExpectedValuesEditor
+            key={resultDocument.id}
+            document={resultDocument}
+          />
         </TabsContent>
         <TabsContent value="json">
           <pre className="json-output">{JSON.stringify(output, null, 2)}</pre>

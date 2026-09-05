@@ -75,13 +75,11 @@ try {
     .getByRole("button", { name: "Add documents", exact: true })
     .first()
     .click();
-  await page
-    .locator('input[type="file"]')
-    .setInputFiles({
-      name: "browser-invoice.txt",
-      mimeType: "text/plain",
-      buffer: Buffer.from("Invoice # INV-2026-500\nTotal due $75.00\n"),
-    });
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "browser-invoice.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("Invoice # INV-2026-500\nTotal due $75.00\n"),
+  });
   await expect(
     page.getByRole("button", { name: "Run extraction", exact: true }),
   ).toBeEnabled();
@@ -110,7 +108,7 @@ try {
     .getByRole("button", { name: "Edit ground truth", exact: true })
     .click();
   await page
-    .getByLabel("Expected values")
+    .getByRole("textbox", { name: "Expected values", exact: true })
     .fill(JSON.stringify({ invoice_number: "INV-2026-500", total: 80 }));
   await page
     .getByRole("button", { name: "Save ground truth", exact: true })
@@ -123,7 +121,9 @@ try {
   await page
     .getByRole("button", { name: "Edit ground truth", exact: true })
     .click();
-  await expect(page.getByLabel("Expected values")).toContainText("80");
+  await expect(
+    page.getByRole("textbox", { name: "Expected values", exact: true }),
+  ).toContainText("80");
   await page
     .getByRole("dialog")
     .getByRole("button", { name: "Close", exact: true })
@@ -279,7 +279,9 @@ try {
   await expect(
     page.getByRole("heading", { name: "Your local backend is unavailable" }),
   ).toBeVisible();
-  await expect(page.getByRole("banner").getByText("API offline", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("banner").getByText("API offline", { exact: true }),
+  ).toBeVisible();
   await page.unroute("**/v1/ready");
   await page.getByRole("button", { name: "Reconnect", exact: true }).click();
   await expect(

@@ -119,3 +119,11 @@ No cloud deployment, authentication service, or hosted model is required to run 
 Schema Builder source: `https://www.extend.ai/ui/r/styles/new-york/schema-builder.json` (license in `EXTEND-LICENSE.md`). Local adaptations replace registry icon placeholders, add accessible input names, and allow the JSON view to display the full schema with preserved constraints. New primitives are shadcn Tabs and Collapsible.
 
 `npm test` covers schema round trips, nested moves, validation, evaluation grouping, and missing/null/zero field values. `npm run test:integration` additionally verifies processor metadata/version persistence, group membership, immutable evaluation snapshots, and repeated runs against a saved configuration using a disposable local backend.
+
+## Expected values and source inspection
+
+Playground and processor configuration use equal-width document and editor/result panes on desktop. Schema fields and enum values have delete controls, and description inputs wrap and grow with their content.
+
+Extraction fields show **Result** and **Expected** together. The **Expected** tab edits document ground truth and can add that document to an existing or new evaluation dataset. Saving ground truth affects future evaluations; previously scored runs retain their saved expectations. Explicit null, false, and zero values remain distinct from unannotated fields.
+
+Source overlays use the backend’s normalized coordinates and retain multiple citations per field. Older absolute coordinates are converted using parser page dimensions. Fields without grounding evidence show no citation; selecting a cited field focuses its first source area.

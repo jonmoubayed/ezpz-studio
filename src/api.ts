@@ -1,3 +1,4 @@
+import { expectedValue, extractionCitations } from "./result-model";
 import type {
   Config,
   Dataset,
@@ -98,27 +99,15 @@ export function normalizeDocument(d: any): Document {
 export function extractionFields(e: any, groundTruth?: any): Field[] {
   return Object.entries(e?.result?.fields || {}).map(
     ([key, v]: [string, any]) => {
-      const evidence = v.evidence?.[0];
-      const page = e?.parser_ir?.pages?.find(
-        (p: any) => p.page === evidence?.page,
-      );
-      const bbox = evidence?.bbox;
+      const citations = extractionCitations(e, v?.evidence);
       return {
         key,
-        value: v.value ?? null,
-        expected: groundTruth?.value?.[key] ?? null,
-        confidence: v.confidence ?? 0,
-        page: evidence?.page || 1,
-        ...(bbox?.length === 4 && page?.width && page?.height
-          ? {
-              area: {
-                left: (bbox[0] / page.width) * 100,
-                top: (bbox[1] / page.height) * 100,
-                width: ((bbox[2] - bbox[0]) / page.width) * 100,
-                height: ((bbox[3] - bbox[1]) / page.height) * 100,
-              },
-            }
-          : {}),
+        value: v?.value ?? null,
+        ...expectedValue(groundTruth?.value, key),
+        confidence: v?.confidence ?? 0,
+        citations,
+        page: citations[0]?.page || 1,
+        ...(citations[0] ? { area: citations[0].area } : {}),
       };
     },
   );
@@ -182,6 +171,7 @@ export async function inspectDocument(
   return {
     ...d,
     fields: extractionFields(data.extraction, data.ground_truth),
+    groundTruth: data.ground_truth?.value || {},
     runId: data.extraction?.run_id,
     warnings: data.extraction?.warnings || [],
   };
@@ -363,4 +353,23 @@ export function mergeEditableConfig(base: any, config: Config) {
   if (!["ollama", "openai-compatible"].includes(config.provider))
     delete merged.model.base_url;
   return merged;
+}
+
+export async function saveGroundTruth(
+  documentId: string,
+  value: Record<string, import("./domain").JsonValue>,
+) {
+  return post(`/documents/${encodeURIComponent(documentId)}/ground-truth`, {
+    value,
+    annotation_status: "complete",
+    author: "local",
+  });
+}
+export async function addDatasetDocument(
+  datasetId: string,
+  documentId: string,
+) {
+  return post(`/datasets/${encodeURIComponent(datasetId)}/documents`, {
+    document_id: documentId,
+  });
 }

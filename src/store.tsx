@@ -1,3 +1,4 @@
+import { withExpectedValues, expectedValues } from "./result-model";
 import React, {
   createContext,
   useContext,
@@ -52,6 +53,7 @@ function useStore() {
   const connectionAttempt = useRef(0);
   const reviewAttempt = useRef(0);
   const documentRequest = useRef(0);
+  const [workspaceRevision, setWorkspaceRevision] = useState(0);
 
   const [page, setPageState] = useState<Page>(() => {
     try {
@@ -272,7 +274,7 @@ function useStore() {
         });
     }
     return () => abort.abort();
-  }, [selectedId, activeProcessorId, mode, connection]);
+  }, [selectedId, activeProcessorId, mode, connection, workspaceRevision]);
   function notifyError(e: unknown) {
     setMessage(
       e instanceof Error
@@ -359,6 +361,7 @@ function useStore() {
       );
       setConfigRevision((v) => v + 1);
       setConnection("ready");
+      setWorkspaceRevision((v) => v + 1);
       const url = new URL(location.href);
       url.searchParams.delete("demo");
       history.replaceState(null, "", url);
@@ -485,10 +488,13 @@ function useStore() {
           throw new Error(
             "Your file is ready to preview. Connect the local API in Settings to run a real extraction.",
           );
-        const extracted: Document = {
-          ...selected,
-          fields: sampleDocuments.find((d) => d.id === selected.id)!.fields,
-        };
+        const extracted = withExpectedValues(
+          {
+            ...selected,
+            fields: sampleDocuments.find((d) => d.id === selected.id)!.fields,
+          },
+          expectedValues(selected),
+        );
         updateDocument(extracted);
         if (page !== "Configuration")
           setMessage(
@@ -509,9 +515,13 @@ function useStore() {
           processor.id,
         );
         const extraction = result.extraction || result;
+        const { ground_truth } = await api.request(
+          `/documents/${selected.id}/ground-truth`,
+        );
         const extracted: Document = {
           ...selected,
-          fields: api.extractionFields(extraction),
+          fields: api.extractionFields(extraction, ground_truth),
+          groundTruth: ground_truth?.value || {},
           status: "Extracted",
           runId: undefined,
           warnings: extraction.warnings || result.warnings || [],
@@ -599,6 +609,64 @@ function useStore() {
       setBusy(false);
     }
   }
+  function updateExpectedValues(id: string, value: Record<string, JsonValue>) {
+    setDocuments((ds) =>
+      ds.map((d) => (d.id === id ? withExpectedValues(d, value) : d)),
+    );
+  }
+  async function saveExpectedValues(
+    d: Document,
+    value: Record<string, JsonValue>,
+    target?: { id?: string; name?: string },
+  ) {
+    setBusy(true);
+    try {
+      if (mode === "live") {
+        await api.saveGroundTruth(d.id, value);
+        updateExpectedValues(d.id, value);
+        if (target?.id) await api.addDatasetDocument(target.id, d.id);
+        else if (target?.name)
+          await api.createDataset(target.name.trim(), [d.id]);
+        if (target) await refresh();
+      } else {
+        updateExpectedValues(d.id, value);
+        if (target?.id)
+          setDatasets((ds) =>
+            ds.map((dataset) => {
+              if (dataset.id !== target.id) return dataset;
+              const members = [
+                ...new Set([
+                  ...(dataset.members ||
+                    documents
+                      .filter((doc) => doc.sample)
+                      .slice(0, dataset.count)
+                      .map((doc) => doc.id)),
+                  d.id,
+                ]),
+              ];
+              return { ...dataset, members, count: members.length };
+            }),
+          );
+        else if (target?.name)
+          setDatasets((ds) => [
+            ...ds,
+            {
+              id: crypto.randomUUID(),
+              name: target.name!.trim(),
+              description: "Added from expected values",
+              count: 1,
+              members: [d.id],
+            },
+          ]);
+      }
+      return true;
+    } catch (e) {
+      notifyError(e);
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
   async function review(
     d: Document,
     f: string,
@@ -644,6 +712,8 @@ function useStore() {
   }
   return {
     mode,
+    updateExpectedValues,
+    saveExpectedValues,
     connection,
     adapters,
     reviewDocuments:

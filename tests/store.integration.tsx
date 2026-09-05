@@ -175,6 +175,67 @@ await act(async () => {
 assert.equal(store!.config.prompt, "Unsaved local processor draft");
 assert.equal(store!.mode, "live");
 assert.equal(new URLSearchParams(location.search).has("demo"), false);
+// Save expected values and attach this source to an eval dataset without rerunning a model.
+const expected = {
+  invoice_number: "INV-2026-101",
+  total: 0,
+  approved: false,
+  optional: null,
+  items: [{ price: 25 }],
+};
+await act(async () => {
+  assert.equal(
+    await store!.saveExpectedValues(store!.selected!, expected, {
+      name: "Expected values benchmark",
+    }),
+    true,
+  );
+});
+const savedDataset = store!.datasets.find(
+  (d) => d.name === "Expected values benchmark",
+)!;
+assert.equal(savedDataset.count, 1);
+await act(async () => {
+  assert.equal(
+    await store!.saveExpectedValues(store!.selected!, expected, {
+      id: savedDataset.id,
+    }),
+    true,
+  );
+});
+assert.equal(
+  store!.datasets.find((d) => d.id === savedDataset.id)?.count,
+  1,
+  "Adding twice must not duplicate membership",
+);
+const manifest = (await api.request(`/datasets/${savedDataset.id}/manifest`))
+  .manifest;
+assert.deepEqual(manifest.documents[0].ground_truth, expected);
+await act(async () => {
+  await store!.connect();
+});
+await settle(
+  () => store!.selected?.groundTruth?.total === 0,
+  "restored ground truth",
+);
+assert.equal(store!.selected?.groundTruth?.total, 0);
+await act(async () => {
+  const result = await store!.extract();
+  assert.equal(result?.fields.find((f) => f.key === "total")?.expected, 0);
+  assert.equal(
+    result?.fields.find((f) => f.key === "total")?.hasExpected,
+    true,
+  );
+});
+const originalRun = (await api.request(`/runs/${run.id}`)).run;
+assert.equal(
+  originalRun.evaluations[0].fields.total.expected,
+  80,
+  "Updating ground truth must preserve prior evaluation snapshots",
+);
+console.log(
+  "PASS: expected values saved with dataset membership, duplicate protection, manifest round trip, preview comparisons, and unchanged historical evaluations.",
+);
 await act(async () => {
   root.unmount();
 });

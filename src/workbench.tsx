@@ -1,3 +1,4 @@
+import { ExpectedValuesEditor, FieldValues } from "./expected-values";
 import { FieldSelect } from "./components/field-select";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import {
@@ -67,10 +68,16 @@ export function SourceViewer({
     return () => observer.disconnect();
   }, []);
   const [text, setText] = useState("");
+  const [viewerReady, setViewerReady] = useState(0);
+  const citations = field?.citations?.length
+    ? field.citations
+    : field?.area
+      ? [{ page: field.page || 1, area: field.area }]
+      : [];
   useEffect(() => {
     if (field?.area)
       viewer.current?.scrollToPageArea(field.page || 1, field.area);
-  }, [field?.key, document.id]);
+  }, [field?.key, field?.page, field?.area, document.id, viewerReady]);
   useEffect(() => {
     setText("");
     if (document.type.startsWith("text/")) {
@@ -95,6 +102,9 @@ export function SourceViewer({
         >
           <PDFViewer
             ref={viewer}
+            onDocumentLoadSuccess={() =>
+              requestAnimationFrame(() => setViewerReady((v) => v + 1))
+            }
             defaultZoom={Math.max(0.25, Math.min(1, (viewerWidth - 40) / 612))}
             src={document.src}
             fileName={document.name}
@@ -102,17 +112,27 @@ export function SourceViewer({
             showRotateControls={false}
             className="actual-pdf-viewer h-full border-0 rounded-none"
             renderPageOverlay={({ pageNumber }) =>
-              field?.area && pageNumber === (field.page || 1) ? (
-                <HumanReviewHighlight
-                  location={{ page: field.page || 1, area: field.area }}
-                />
-              ) : null
+              citations
+                .filter((c) => c.page === pageNumber)
+                .map((citation, index) => (
+                  <HumanReviewHighlight
+                    key={`${pageNumber}-${index}`}
+                    location={citation}
+                  />
+                ))
             }
           />
         </Suspense>
       ) : document.type.startsWith("image/") ? (
         <div className="image-source">
-          <img src={document.src} alt={`Source document: ${document.name}`} />
+          <div className="image-page">
+            <img src={document.src} alt={`Source document: ${document.name}`} />
+            {citations
+              .filter((c) => c.page === 1)
+              .map((citation, index) => (
+                <HumanReviewHighlight key={index} location={citation} />
+              ))}
+          </div>
         </div>
       ) : document.type.startsWith("text/") ? (
         <pre className="text-source">{text || "Loading source…"}</pre>
@@ -319,38 +339,9 @@ export function Playground() {
   const [tab, setTab] = useState("Fields");
   const [active, setActive] = useState("invoice_number");
   const [groundTruthOpen, setGroundTruthOpen] = useState(false);
-  const [groundTruth, setGroundTruth] = useState("");
-  const [error, setError] = useState("");
   const d = s.selected;
   const field = d?.fields.find((f) => f.key === active);
   const json = Object.fromEntries(d?.fields.map((f) => [f.key, f.value]) || []);
-  async function saveGroundTruth() {
-    try {
-      const value = JSON.parse(groundTruth);
-      if (!value || typeof value !== "object" || Array.isArray(value))
-        throw new Error("Ground truth must be a JSON object.");
-      if (s.mode === "live")
-        await api.request(`/documents/${d.id}/ground-truth`, {
-          method: "POST",
-          body: JSON.stringify({
-            value,
-            annotation_status: "complete",
-            author: "local",
-          }),
-        });
-      s.updateDocument({
-        ...d,
-        fields: d.fields.map((f) => ({
-          ...f,
-          expected: value[f.key] ?? null,
-        })),
-      });
-      setGroundTruthOpen(false);
-      s.setMessage("Ground truth saved for this document.");
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }
   return (
     <>
       <Heading
@@ -412,7 +403,7 @@ export function Playground() {
               </button>
             </div>
             <div className="results-tabs">
-              {["Fields", "JSON", "Schema"].map((t) => (
+              {["Fields", "JSON", "Expected", "Schema"].map((t) => (
                 <button
                   key={t}
                   className={tab === t ? "active" : ""}
@@ -458,13 +449,7 @@ export function Playground() {
                             {(f.confidence * 100).toFixed(0)}%
                           </span>
                         </div>
-                        <strong>
-                          {typeof f.value === "number"
-                            ? f.value.toLocaleString("en-US", {
-                                maximumFractionDigits: 2,
-                              })
-                            : displayValue(f.value)}
-                        </strong>
+                        <FieldValues field={f} />
                         <small>
                           {f.area ? (
                             <>
@@ -489,6 +474,10 @@ export function Playground() {
                   />
                 )}
               </>
+            ) : tab === "Expected" ? (
+              <div className="expected-tab">
+                <ExpectedValuesEditor key={d.id} document={d} />
+              </div>
             ) : tab === "JSON" ? (
               <pre className="json-output extraction-json">
                 {JSON.stringify(json, null, 2)}
@@ -513,22 +502,7 @@ export function Playground() {
             <div className="results-footer">
               <Button
                 disabled={s.busy}
-                onClick={async () => {
-                  setError("");
-                  try {
-                    const saved =
-                      s.mode === "live"
-                        ? (await api.request(`/documents/${d.id}/ground-truth`))
-                            .ground_truth?.value || {}
-                        : Object.fromEntries(
-                            d.fields.map((f) => [f.key, f.expected]),
-                          );
-                    setGroundTruth(JSON.stringify(saved, null, 2));
-                    setGroundTruthOpen(true);
-                  } catch (e) {
-                    s.notifyError(e);
-                  }
-                }}
+                onClick={() => setGroundTruthOpen(true)}
               >
                 <CheckCheck size={14} />
                 Edit ground truth
@@ -559,23 +533,16 @@ export function Playground() {
         open={groundTruthOpen}
         onClose={() => setGroundTruthOpen(false)}
       >
-        <label>
-          Expected values
-          <textarea
-            className="code-editor"
-            rows={14}
-            value={groundTruth}
-            onChange={(e) => setGroundTruth(e.target.value)}
+        {d && (
+          <ExpectedValuesEditor
+            key={d.id}
+            document={d}
+            onSaved={() => {
+              setGroundTruthOpen(false);
+              s.setMessage("Document ground truth saved.");
+            }}
           />
-        </label>
-        {error && (
-          <p role="alert" className="form-error">
-            {error}
-          </p>
         )}
-        <Button variant="primary" onClick={saveGroundTruth}>
-          Save ground truth
-        </Button>
       </Modal>
     </>
   );

@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { Trash2 } from "lucide-react";
 import {
   closestCenter,
   DndContext,
@@ -100,24 +101,15 @@ function TextCheckGlyph(props: InlineRegistryIconProps) {
   return <CaptionsIcon {...props} />;
 }
 export type SchemaBuilderScalarType =
-  | "string"
-  | "number"
-  | "integer"
-  | "boolean"
-  | "null";
+  "string" | "number" | "integer" | "boolean" | "null";
 export type SchemaBuilderFieldType =
-  | SchemaBuilderScalarType
-  | "object"
-  | "array"
-  | "enum";
+  SchemaBuilderScalarType | "object" | "array" | "enum";
 export type SchemaBuilderArrayScalarType = Exclude<
   SchemaBuilderScalarType,
   "null"
 >;
 export type SchemaBuilderArrayItemType =
-  | SchemaBuilderArrayScalarType
-  | "object"
-  | "enum";
+  SchemaBuilderArrayScalarType | "object" | "enum";
 export type SchemaBuilderEnumValue = {
   id: string;
   value: string;
@@ -245,8 +237,7 @@ const TYPE_LABELS: Record<
   "array-object": "Array<object>",
 };
 type SchemaBuilderTypeStyleKey =
-  | SchemaBuilderFieldType
-  | `array-${SchemaBuilderArrayItemType}`;
+  SchemaBuilderFieldType | `array-${SchemaBuilderArrayItemType}`;
 const TYPE_STYLES: Record<
   SchemaBuilderTypeStyleKey,
   {
@@ -1274,6 +1265,38 @@ function InlineTextInput({
     />
   );
 }
+function InlineDescriptionInput(
+  props: React.TextareaHTMLAttributes<HTMLTextAreaElement>,
+) {
+  const ref = React.useRef<HTMLTextAreaElement>(null);
+  React.useLayoutEffect(() => {
+    const input = ref.current;
+    if (!input) return;
+    const resize = () => {
+      input.style.height = "auto";
+      input.style.height = `${input.scrollHeight}px`;
+    };
+    resize();
+    let width = input.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (input.clientWidth !== width) {
+        width = input.clientWidth;
+        resize();
+      }
+    });
+    observer.observe(input);
+    return () => observer.disconnect();
+  }, [props.value]);
+  return (
+    <textarea
+      {...props}
+      ref={ref}
+      rows={1}
+      className="schema-description-input"
+    />
+  );
+}
+
 function EnumEditor({
   values,
   onChange,
@@ -1333,6 +1356,9 @@ function EnumEditor({
                   key={value.id}
                   value={value}
                   onValueChange={updateValue}
+                  onRemove={() =>
+                    onChange(values.filter((item) => item.id !== value.id))
+                  }
                 />
               ))}
               <tr>
@@ -1357,7 +1383,9 @@ function EnumEditor({
 const SortableEnumRow = React.memo(function SortableEnumRow({
   value,
   onValueChange,
+  onRemove,
 }: {
+  onRemove: () => void;
   value: SchemaBuilderEnumValue;
   onValueChange: (
     id: string,
@@ -1416,8 +1444,8 @@ const SortableEnumRow = React.memo(function SortableEnumRow({
           />
         </div>
       </td>
-      <td className="border-l p-0 align-top">
-        <InlineTextInput
+      <td className="relative border-l p-0 align-top">
+        <InlineDescriptionInput
           value={value.description}
           aria-label={`Description for enum ${value.value || "new value"}`}
           placeholder="When the reviewer accepts the extracted value."
@@ -1428,6 +1456,15 @@ const SortableEnumRow = React.memo(function SortableEnumRow({
             }))
           }
         />
+        <button
+          type="button"
+          className="schema-remove-row"
+          aria-label={`Remove enum value ${value.value || "empty value"}`}
+          title="Remove enum value"
+          onClick={onRemove}
+        >
+          <Trash2 size={14} />
+        </button>
       </td>
     </tr>
   );
@@ -1569,6 +1606,9 @@ function SchemaBuilderTable({
       );
     },
   );
+  const removeProperty = useStableCallback((id: string) => {
+    onPropertiesChange(properties.filter((property) => property.id !== id));
+  });
   const addProperty = React.useCallback(() => {
     onPropertiesChange([...properties, createProperty()]);
   }, [onPropertiesChange, properties]);
@@ -1612,6 +1652,7 @@ function SchemaBuilderTable({
                 nestedEditorOpenByPropertyId={nestedEditorOpenByPropertyId}
                 onNestedEditorOpenChange={onNestedEditorOpenChange}
                 onPropertyChange={updateProperty}
+                onPropertyRemove={removeProperty}
               />
             </React.Fragment>
           ))}
@@ -1646,6 +1687,7 @@ const SortablePropertyRows = React.memo(function SortablePropertyRows({
   nestedEditorOpenByPropertyId,
   onNestedEditorOpenChange,
   onPropertyChange,
+  onPropertyRemove,
 }: {
   property: SchemaBuilderProperty;
   depth: number;
@@ -1653,6 +1695,7 @@ const SortablePropertyRows = React.memo(function SortablePropertyRows({
   nestedEditorOpenByPropertyId: Record<string, boolean>;
   onNestedEditorOpenChange: (propertyId: string, open: boolean) => void;
   onPropertyChange: (id: string, property: SchemaBuilderProperty) => void;
+  onPropertyRemove: (id: string) => void;
 }) {
   const {
     attributes,
@@ -1725,8 +1768,8 @@ const SortablePropertyRows = React.memo(function SortablePropertyRows({
         <td className="border-l p-1 align-top">
           <SchemaTypeMenu property={property} onChange={handlePropertyChange} />
         </td>
-        <td className="border-l p-0 align-top">
-          <InlineTextInput
+        <td className="relative border-l p-0 align-top">
+          <InlineDescriptionInput
             value={property.description}
             aria-label={`Description for ${property.key || "new property"}`}
             placeholder="Describe what this field should extract."
@@ -1737,6 +1780,15 @@ const SortablePropertyRows = React.memo(function SortablePropertyRows({
               })
             }
           />
+          <button
+            type="button"
+            className="schema-remove-row"
+            aria-label={`Remove field ${property.key || "new property"}`}
+            title="Remove field"
+            onClick={() => onPropertyRemove(property.id)}
+          >
+            <Trash2 size={14} />
+          </button>
         </td>
       </tr>
       {hasNestedEditor ? (

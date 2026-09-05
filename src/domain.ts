@@ -9,12 +9,7 @@ export type Page =
   | "Review queue"
   | "Settings";
 export type JsonValue =
-  | string
-  | number
-  | boolean
-  | null
-  | JsonValue[]
-  | { [key: string]: JsonValue };
+  string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 export function displayValue(value: JsonValue): string {
   return value === null
     ? "null"
@@ -22,7 +17,13 @@ export function displayValue(value: JsonValue): string {
       ? JSON.stringify(value)
       : String(value);
 }
+export type Citation = {
+  page: number;
+  area: { left: number; top: number; width: number; height: number };
+};
 export type Field = {
+  hasExpected?: boolean;
+  citations?: Citation[];
   key: string;
   value: JsonValue;
   expected: JsonValue;
@@ -39,6 +40,7 @@ export type Document = {
   pages: number;
   status: string;
   fields: Field[];
+  groundTruth?: Record<string, JsonValue>;
   sample?: boolean;
   runId?: string;
   warnings?: string[];
