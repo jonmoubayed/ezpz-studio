@@ -1,141 +1,195 @@
-# ezpz studio — standalone redesign
+<div align="center">
 
-A new React + TypeScript frontend for a locally hosted, model-agnostic document extraction workbench. This is a separate Git repository, dependency tree, and build. It does not import or copy any UI from the original ezpz frontend.
+# ezpz studio
 
-## Run
+### Your documents. Your models. Measurable extraction.
 
-Requires Node.js 20.19+ or 22.12+.
+A local-first workbench for building document extractors, comparing experiments, and turning reviewer feedback into better results.
 
-```sh
+**Model-agnostic · Locally hostable · MIT licensed**
+
+[Quick start](#quick-start) · [How it works](#how-it-works) · [Configuration](docs/configuration.md) · [Contributing](CONTRIBUTING.md)
+
+</div>
+
+![Playground showing an invoice beside extracted fields, expected values, and source citations](docs/images/playground.png)
+
+*The screenshots use synthetic demo documents. Their scores are illustrative, not model benchmarks.*
+
+## Why ezpz?
+
+Getting JSON out of a document is only the beginning. You also need to see where each value came from, measure what changed when you edit a prompt, and understand why one configuration works better than another.
+
+ezpz brings that loop into one workspace. Keep the source document beside your schema and results. Save reusable processors for invoices, 1099s, receipts, contracts, or your own document types. Build a benchmark, compare experiments, and inspect the fields behind the score—all while choosing your own model and parser.
+
+You do not need an Extend account or an Extend extraction model. The studio uses open-source Extend UI components for document viewing and schema editing.
+
+> **Project status:** early development. This repository contains the standalone React frontend. Live extraction and persistence require the separate `ezpz-studio` Python backend; the setup below connects the two. A sample-only demo runs without a backend.
+
+## What you can do
+
+| Workflow | In the studio |
+| --- | --- |
+| **Build processors** | Create custom extraction schemas, prompts, model settings, and parser configurations. Save versions and reuse them across documents. |
+| **Edit schemas visually** | Use the Extend Schema Builder for nested objects, arrays, enums, descriptions, and field reordering, with a synchronized JSON view. |
+| **Inspect extractions** | View the document alongside results and expected values. Follow available source citations; inspect arrays of objects as tables. |
+| **Create ground truth** | Correct expected values and add the document plus its annotation to an existing or new evaluation dataset. |
+| **Compare experiments** | Give each evaluation group its own benchmark, stats, and experiment pages. Compare 2–4 runs by accuracy, model, prompt, schema, latency, and cost. |
+| **Review failures** | Open a saved run, filter incorrect fields, inspect its source documents, and record corrections, acceptance, ambiguity, and reviewer notes. |
+| **Improve iteratively** | Use the manual hill-climbing flow to test a prompt refinement, model change, or schema change against a baseline. |
+
+## Quick start
+
+### Explore the demo
+
+From this repository, with **Node.js 22.12+** and npm installed:
+
+```bash
+npm ci
+npm run dev
+```
+
+Open [the demo playground](http://127.0.0.1:5180/?demo=1#Playground).
+
+Demo mode uses labeled sample documents and scores. It makes no model calls. Normal URLs start in live mode and show a connection screen when the backend is unavailable.
+
+### Run your own workspace
+
+Use **Python 3.12** for the backend. Its package declares Python 3.10+, but the current upload handler depends on `cgi`, so use **3.10–3.12**, not 3.13+.
+
+Place the two source checkouts side by side:
+
+```text
+workspace/
+├── ezpz-studio/             # Python API, database, parsers, model adapters
+└── ezpz-studio-redesign/    # This frontend repository
+```
+
+From `ezpz-studio-redesign`:
+
+```bash
+# Install the backend dependencies in an isolated environment.
+python3.12 -m venv ../ezpz-studio/.venv
+../ezpz-studio/.venv/bin/python -m pip install -r ../ezpz-studio/requirements.txt
+
+# Install and start the studio.
 npm ci
 npm start
 ```
 
-Open **http://127.0.0.1:5180**. Studio connects to the local backend automatically and restores your selected processor, working configuration, source, and review run. `npm start` starts the backend from `../ezpz-studio` when needed, then launches Vite. An already-running backend is reused and left running when Studio stops. Install the backend Python requirements first (see below).
+Open [ezpz studio](http://127.0.0.1:5180).
 
-To run only the frontend, use `npm run dev`. To explore illustrative fixtures without a backend, open **http://127.0.0.1:5180/?demo=1** or choose **Explore demo** on the offline screen.
+`npm start` checks the API at `http://127.0.0.1:4173`, starts the sibling backend if needed, and launches the frontend on port `5180`. It uses the backend's `.venv/bin/python` when present. An existing backend is reused and left running when you stop the frontend.
 
-```sh
-npm run build
-npm run preview
+The workspace starts without sample documents. No provider key is needed to start the app. The bundled deterministic adapter is an invoice-oriented development fallback; configure an LLM for general extraction.
+
+For another checkout location, a different Python interpreter, or manual server startup, see [Configuration](docs/configuration.md).
+
+### Your first useful experiment
+
+1. **Create a processor.** Start with a template or define a custom schema. Select your model and parser.
+2. **Add a document.** Use Playground or the processor's Configure page. Keep the source visible while editing the schema.
+3. **Run extraction.** Inspect fields and citations. In **Expected**, enter verified ground truth; optionally copy the extraction as a starting point and correct it.
+4. **Build a benchmark.** Add the document and expected values to an evaluation dataset. Repeat for a representative set of documents.
+5. **Create an evaluation group.** Choose that dataset, run a baseline experiment, then try a different prompt, model, or schema.
+6. **Compare and review.** Select experiments within the group, compare their runs, and open a result to inspect incorrect fields against the source.
+
+## How it works
+
+| Concept | Responsibility | Example |
+| --- | --- | --- |
+| **Processor** | A reusable extraction configuration with saved versions | Invoice extraction |
+| **Dataset** | A collection of documents used as a benchmark | Reviewed invoice set |
+| **Evaluation group** | A shared benchmark and a home for related experiments | Invoice quality |
+| **Experiment** | One saved configuration within the group | Currency-aware prompt |
+| **Run** | One execution of that configuration, with its own results | The first run and a repeat run |
+| **Ground truth** | The verified expected values used for scoring | Correct invoice number and total |
+
+A group opens into its own stats and experiment list. An experiment opens into its configuration and run history. A run opens into document-level results. Repeating a saved configuration adds another run to its experiment.
+
+![Dedicated evaluation group with benchmark context, accuracy and improvement stats, and experiment comparison controls](docs/images/evaluation-group.png)
+
+Group summaries use each experiment's latest completed run when available, falling back to its latest attempt. Comparisons stay within a group and show the saved configurations behind the selected runs.
+
+**Keep the benchmark stable when measuring improvements.** Dataset membership and document annotations can change. Sharing a dataset ID does not guarantee two runs used identical documents or ground truth. Annotation edits affect future evaluations; historical results retain their recorded expectations.
+
+### Confidence is not accuracy
+
+**Model** confidence is the LLM's self-reported certainty, not a calibrated probability of correctness. **Rule-based** and **Sample** badges identify deterministic and demo scores. Missing or invalid confidence stays unknown; it is never replaced with a made-up percentage.
+
+Evaluation accuracy measures extracted fields against ground truth. An unannotated field remains unscored. Explicit `null`, `false`, and `0` are preserved as values rather than treated as missing annotations.
+
+## Bring your own models and parsers
+
+The backend adapters support OpenAI, Anthropic, Google Gemini, Ollama, and OpenAI-compatible endpoints. You can enter a custom model ID; availability depends on the configured service. Native text, Docling, and LlamaParse are the current parser choices.
+
+Put provider credentials in the **backend's** environment or `.env` file, then restart the backend. Never put provider secrets in frontend `VITE_*` variables. See [provider configuration](docs/configuration.md#models-and-parsers) for the supported environment names and local endpoint setup.
+
+Missing credentials, unavailable optional dependencies, and some provider failures can trigger a local fallback. Read the warnings shown with a result before treating it as an evaluation of your selected model.
+
+## Local hosting and data
+
+- Documents, ground truth, saved processor versions, runs, and review decisions persist in the backend's SQLite database and blob directory, normally `.ezpz/ezpz.db` and `.ezpz/blobs`.
+- Browser storage keeps working drafts, UI selections, and demo state. It is separate from the backend database.
+- Fonts and the PDF engine are served locally. Model and parser requests follow the providers you select: choosing a hosted service sends the relevant document content to that service.
+- The current servers are intended for a trusted local workspace. Authentication, multi-tenant access control, production deployment, and background job scheduling are not included. Keep the default loopback binding for local use.
+
+For backups, stop the backend and copy its database and blob directory together. Save any browser-only processor drafts as versions first. Keep credentials out of shared backups and issue attachments.
+
+## Development
+
+```bash
+npm run dev       # Frontend with hot reload; connect a separately running backend
+npm start         # Start/reuse the local backend, then start the frontend
+npm test          # Unit and component-rendering checks
+npm run build     # TypeScript checks and production assets in dist/
+npm run preview   # Preview dist/ locally on port 5180
 ```
 
-The preview also serves on port 5180; stop the dev server before using it.
+Stop the development server before using the preview on the same port. The preview still needs the backend for live data.
 
-## Connect the existing local backend
+Run the API and React store integration tests against a disposable backend:
 
-In the original `ezpz-studio` repository, install its Python requirements and run:
-
-```sh
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-.venv/bin/python -m backend.server --root . --host 127.0.0.1 --port 4173
+```bash
+EZPZ_TEST_PYTHON=../ezpz-studio/.venv/bin/python npm run test:integration
 ```
 
-Studio connects automatically. **Settings → Refresh connection** reloads workspace data; an unavailable API shows an explicit reconnect screen. Requests to `/v1` are proxied to `http://127.0.0.1:4173`. To change that address, copy `.env.example` to `.env`, edit `EZPZ_API_URL`, and restart the frontend server. Provider credentials remain in the backend configuration; never place them in frontend environment variables.
+The test runner creates a temporary database and blob directory and cleans them up afterward. It exercises upload, extraction, annotation, dataset membership, processor versions, evaluation groups, repeat runs, and feedback. It uses the deterministic adapter and makes no external model calls.
 
-`npm start` uses the backend’s `.venv/bin/python` if present, otherwise `python3`. Set `EZPZ_PYTHON` to a different virtualenv interpreter, `EZPZ_BACKEND_REPO` to another backend checkout, or `EZPZ_STUDIO_PORT` to change the frontend port. These settings can live in this repo’s ignored `.env`. The backend currently needs Python 3.9–3.12 because its upload handler uses `cgi`.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the source map, contribution workflow, test expectations, and browser-test status.
 
-The frontend does not require an Extend account, Extend API, or Extend extraction model. Extend supplies the open-source document UI only. Fonts and the PDF engine WASM are served locally; the install script copies the pinned WASM package into `public/vendor/`.
+## Troubleshooting
 
-## Included flows
-
-| Area | What works |
+| Symptom | Check |
 | --- | --- |
-| Overview | Workspace metrics, benchmark accuracy history, review count, recent experiments |
-| Playground | Source selection, PDF/image/text viewing, field citations, confidence, structured JSON export, configuration editing, extraction previews, ground-truth editing |
-| Datasets | Source library, dataset creation from selected documents, membership inspection, manifest export |
-| Evaluations | Search, dataset filtering, sorting, two-run comparisons, immutable configuration snapshots, run export, benchmark execution |
-| Hill climbing | Choose a fixed benchmark and baseline, edit a candidate hypothesis/configuration, run the candidate, compare results |
-| Review queue | Source-grounded field review, typed corrections, reviewer notes, acceptance, ambiguity flags, feedback export |
-| Settings | Local API connection, arbitrary model IDs, provider and parser selection, custom compatible endpoint, configuration export |
+| Studio cannot connect | Start the backend and check [its readiness endpoint](http://127.0.0.1:4173/v1/ready). Verify `EZPZ_API_URL` and restart the frontend after changes. |
+| `ModuleNotFoundError: cgi` | Recreate the backend environment with Python 3.10–3.12. |
+| PDF parsing is unavailable | Install `requirements.txt` into the interpreter actually used by the backend. |
+| A selected model returns local results | Check backend credentials and extraction warnings. Restart the backend after updating its `.env`. |
+| A field has no bounding box | Citations require grounding evidence from the parser/extraction. The studio does not invent source locations. |
+| Port `5180` is in use | Stop the other frontend process, or set `EZPZ_STUDIO_PORT` for `npm start`. |
+| A copied backend has old confidence or manifest behavior | Review the compatibility patches and application instructions in [Configuration](docs/configuration.md#backend-compatibility). |
 
-The UI adapts to mobile with a collapsible navigation panel, stacked document/review surfaces, and contained horizontal scrolling for data tables. Dialogs use Radix focus management. Navigation and quick search support keyboard use (`⌘K` / `Ctrl+K`).
+## Current scope
 
-## Demo versus live data
+Hill climbing is a **manual experiment loop**, not an autonomous optimizer. Runs are synchronous. PDF, image, and text/CSV viewing are included; this frontend does not include dedicated DOCX or XLSX viewers. The local deterministic adapter is useful for development and tests, not a general-purpose document understanding model.
 
-- Demo documents and historical scores are illustrative fixtures, not measured model benchmarks.
-- Running a demo experiment adds an explicitly labeled fixture result with a fixed score. It does not call a model or imply the hypothesis improved accuracy.
-- Demo configuration, runs, and feedback persist in browser storage. Demo uploads, ground-truth edits, and new datasets last for the current session. **Settings → Reset demo** restores the initial fixtures.
-- Normal URLs start in live mode. Demo mode is explicit in the URL (`?demo=1`), and demo configuration is stored separately from live processor working copies. Switching back to live restores your backend workspace. An unavailable backend never silently falls back to fixtures.
-- Live uploads, annotations, runs, and review decisions persist in the original backend database. Existing frontend and backend source files remain separate.
-- Extraction previews have no reviewable immutable run. Open a scored run in Evaluations and choose **Review fields**, or select a saved run directly in **Review queue**. Feedback is loaded from the backend and remains scoped to that run, document, and field.
-- Live provider warnings are displayed. The backend can fall back to compatibility parsing or its invoice-specific deterministic model when optional dependencies or credentials are absent. Install its requirements for PDF text parsing, and use a configured model for general extraction.
-- Hill climbing is a manual experiment loop in this version, not an autonomous optimization scheduler. Compare runs from the same dataset. A repeated dataset ID does not itself guarantee unchanged membership or ground truth; retain a fixed benchmark while comparing.
-- PDF, image, and text/CSV preview are included. DOCX/XLSX-specific viewers are not installed in this experiment.
+Demo metrics are fixtures. They should not be used in model comparisons, performance claims, or benchmark reports.
 
-## Extend UI provenance
+## Contributing
 
-Installed directly from the official [Extend UI registry](https://www.extend.ai/ui), using the `new-york` style:
+Bug reports, documentation improvements, accessibility fixes, provider integrations, and extraction/evaluation improvements are welcome. Start with [the contributor guide](CONTRIBUTING.md). Use synthetic documents in issues and tests, and include a minimal reproduction for extraction or scoring bugs.
 
-- `@extend/pdf-viewer` — PDF rendering, zoom, page navigation, search, download, and overlays.
-- `@extend/file-upload` and `@extend/file-thumbnail` — document upload and file representations.
-- `@extend/bounding-box-citations` — its `HumanReviewHighlight` implementation is extracted into a focused module so optional table/diff editors are not bundled.
+## License and acknowledgments
 
-Registry icon placeholders were resolved to Lucide icons. The shared PDF engine was changed from a CDN URL to a locally served WASM asset. Unused registry editor dependencies were removed. The shell, screens, state, charts, API adapter, and styling were authored fresh for this redesign. Upstream licensing is preserved in [EXTEND-LICENSE.md](EXTEND-LICENSE.md). Font and PDF engine licenses are included in `licenses/`.
+Original project code is available under the [MIT License](LICENSE).
 
-## Backend compatibility fix
+The studio builds on [Extend UI](https://www.extend.ai/ui), React, Vite, TypeScript, Radix/shadcn primitives, Lucide, and the EmbedPDF/PDFium viewer. Extend supplies UI components, not a required extraction service.
 
-The connected browser test found that `/v1/datasets/:id/manifest` returned null ground truth even for annotated documents. The local backend now reads each document’s latest annotation when exporting. The fix and its Python regression test are also captured in `patches/backend-manifest-ground-truth.patch` for applying once to another backend checkout.
+Upstream license terms and notices remain in effect for third-party code and assets:
 
-## Verification
+- [Extend UI license](EXTEND-LICENSE.md)
+- [PDFium notices](licenses/pdfium.txt)
+- [Geist](licenses/geist.txt) and [Geist Mono](licenses/geist-mono.txt) font licenses
 
-```sh
-npm test
-npm run test:integration
-npx playwright install chromium
-npm run test:e2e
-npm run build
-```
-
-Unit checks protect structured JSON values, nulls, unknown ground truth, zero-valued metrics, source coordinates, and provider-neutral configuration. The integration test launches the original Python backend with a temporary database and blob directory, performs upload/extract/annotate/dataset/run/review operations, and cleans up afterward. It uses the local deterministic adapter and makes no external model calls.
-
-The integration runner expects the original backend in `../ezpz-studio`. Override `EZPZ_BACKEND_REPO` or `EZPZ_TEST_PYTHON` if needed. It never uses the original database or `.env` file.
-
-The React integration test mounts the real store in StrictMode and checks live startup, processor/draft restoration, extraction, saved review data, reloads, and demo isolation. The headless Chromium test builds the app, starts a disposable backend and Vite proxy, then exercises processor/schema editing, side-by-side extraction, annotations, datasets, grouped evaluations, reviewer corrections, iteration comparison, PDF viewing, and offline recovery. Screenshots are saved under ignored `test-results/`. Tests use the local deterministic adapter; hosted model providers are not called.
-
-## Source layout
-
-- `src/App.tsx` — new navigation shell and global dialogs
-- `src/pages.tsx` — overview, datasets, evaluations, hill climbing, settings
-- `src/workbench.tsx` — extraction and reviewer surfaces
-- `src/store.tsx` — mode-aware workspace state and actions
-- `src/api.ts` — adapter for the existing `/v1` API
-- `src/domain.ts` — data types, sample fixtures, formatting
-- `src/styles.css` — new visual system and responsive layouts
-- `src/components/extend/` — upstream Extend building blocks
-- `scripts/` — local vendor assets, sample generation, isolated integration runner
-
-No cloud deployment, authentication service, or hosted model is required to run the frontend.
-
-## Processors, schemas, and evaluation iterations
-
-- **Processors** is the reusable extraction library. Create an arbitrary custom schema or start from invoice, 1099, receipt, or contract fields. Duplicate any processor, edit its metadata, save versions, load previous versions into a working copy, and test it in Playground.
-- **Configure** opens a split workspace with the source document on the left and Configure / Results tabs on the right, matching Playground’s shared processor selector, configuration bar, and document viewer. Run extraction switches to Results in place; the viewer and schema draft stay mounted. Results include field citations, JSON export, and a notice if settings have changed since the run. Choose or upload a source without leaving the processor editor. Collapsible model settings leave more space for the schema. The actual Extend UI Schema Builder provides nested object/array tables, editable enum descriptions, drag reordering, and a synchronized JSON view. Direct JSON editing is also available. The adapter retains required fields and constraints through renames and moves; advanced schemas that the visual table cannot represent stay in the JSON editor.
-- **Evaluations** groups iterations by the backend evaluation group, with a selectable baseline, accuracy trend, score deltas, model/parser details, latency, and cost. Compare 2–4 runs with saved prompt and schema snapshots. Inspect a run on a full results page with document navigation, failure hotspots, expected/actual values, and source citations in Extend's viewer.
-- Demo processors and versions persist in browser local storage. Live processors and immutable versions use `/v1/processors` and its draft/publish endpoints; evaluation groups and experiments use `/v1/eval-groups`. Saving a version stores it in the local backend; it does not deploy an external service. Earlier run snapshots remain unchanged.
-- Demo evaluation fields and metrics are explicitly illustrative. Live inspection uses the selected run's own extraction/evaluation records, including missing fields and unscored values.
-
-Schema Builder source: `https://www.extend.ai/ui/r/styles/new-york/schema-builder.json` (license in `EXTEND-LICENSE.md`). Local adaptations replace registry icon placeholders, add accessible input names, and allow the JSON view to display the full schema with preserved constraints. New primitives are shadcn Tabs and Collapsible.
-
-`npm test` covers schema round trips, nested moves, validation, evaluation grouping, and missing/null/zero field values. `npm run test:integration` additionally verifies processor metadata/version persistence, group membership, immutable evaluation snapshots, and repeated runs against a saved configuration using a disposable local backend.
-
-## Expected values and source inspection
-
-Playground and processor configuration use equal-width document and editor/result panes on desktop. Schema fields and enum values have delete controls, and description inputs wrap and grow with their content.
-
-Extraction fields show **Result** and **Expected** together. The **Expected** tab edits document ground truth and can add that document to an existing or new evaluation dataset. Saving ground truth affects future evaluations; previously scored runs retain their saved expectations. Explicit null, false, and zero values remain distinct from unannotated fields.
-
-Source overlays use the backend’s normalized coordinates and retain multiple citations per field. Older absolute coordinates are converted using parser page dimensions. Fields without grounding evidence show no citation; selecting a cited field focuses its first source area.
-
-## Model-reported confidence
-
-New LLM extractions request `{ "value": ..., "confidence": 0.83 }` at each extraction leaf. Nested objects retain their structure; arrays receive one score for the whole array. Scores must be finite numbers from 0 to 1. Missing, malformed, and out-of-range scores remain null; the previous 75% fallback is removed.
-
-Badges distinguish **Model**, **Rule-based**, and **Sample** scores. Model confidence is an LLM self-assessment, not calibrated correctness or measured eval accuracy. Historical scores without source metadata show **Not provided**; run extraction again to obtain a new score. Historical runs remain unchanged, and the extraction cache version changes with the response contract.
-
-The backend changes and regression tests are captured in `patches/backend-llm-confidence.patch`. Apply this patch to another backend checkout before using the new confidence badges. Tests mock provider HTTP responses and verify the request contract, nested values, zero and missing confidence, persisted provenance, cache behavior, and unchanged local extraction flows without spending hosted model credits.
-
-Structured response schemas follow [OpenAI’s strict schema requirements](https://developers.openai.com/api/docs/guides/structured-outputs) and [Gemini’s JSON Schema response format](https://ai.google.dev/api/generate-content#generationconfig).
-
-The Expected tab’s dataset action confirms membership and ground truth through the exported manifest before reporting success. Its inline status names the document and destination and includes the updated dataset count. Existing members keep their split and tags; retries retain a newly created dataset ID if membership creation fails. Validation and save failures appear beside the action instead of below the full editor.
+Local adaptations include resolved icon imports, accessible schema controls, preserved schema constraints, citation handling, and locally served PDF engine assets.
