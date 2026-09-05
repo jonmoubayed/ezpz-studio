@@ -465,6 +465,26 @@ function useStore() {
     demo();
     setMessage("Demo reset to the original sample documents and experiments.");
   }
+  const hasRunningEvaluation = runs.some((r) =>
+    ["running", "cancelling"].includes(r.status.toLowerCase()),
+  );
+  useEffect(() => {
+    if (mode !== "live" || !hasRunningEvaluation) return;
+    let stopped = false;
+    const poll = async () => {
+      try {
+        const data = await api.request("/runs");
+        if (!stopped) setRuns(data.runs.map(api.normalizeRun));
+      } catch {
+        /* Preserve the last known run state while reconnecting. */
+      }
+    };
+    const timer = window.setInterval(poll, 2000);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [mode, hasRunningEvaluation]);
   async function refresh() {
     if (mode === "live") {
       const data = await api.loadWorkspace();
@@ -656,13 +676,19 @@ function useStore() {
           "Demo run added using a fixed illustrative score. Connect the API to measure real changes.",
         );
       } else {
-        await api.runBenchmark(datasetId, configuration, name, {
-          ...group,
-          processorId: group?.processorId || activeProcessor?.id,
-        });
+        await api.runBenchmark(
+          datasetId,
+          configuration,
+          name,
+          {
+            ...group,
+            processorId: group?.processorId || activeProcessor?.id,
+          },
+          true,
+        );
         await refresh();
         setMessage(
-          "Benchmark complete. The run and its configuration are saved in the local API.",
+          "Evaluation started. Progress and results are saved in Evaluations.",
         );
       }
       return true;

@@ -1,6 +1,6 @@
 {
   "name": "ezpz-studio-redesign",
-  "version": "0.1.0",
+  "version": "0.1.0-beta.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,7 +11,11 @@
     "postinstall": "node scripts/copy-vendor.mjs",
     "test:integration": "node scripts/test-api.mjs",
     "start": "node scripts/start.mjs",
-    "test:e2e": "npm run build && node scripts/test-api.mjs --browser"
+    "test:e2e": "npm run build && node scripts/test-api.mjs --browser",
+    "test:backend": "python3 -m unittest discover -s backend/tests",
+    "test:package": "node scripts/test-package.mjs",
+    "release:bundle": "node scripts/release-bundle.mjs",
+    "test:install": "node scripts/test-install.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

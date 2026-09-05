@@ -12,7 +12,7 @@ async function freePort() {
   return port;
 }
 const port = await freePort();
-const backend = path.resolve(process.env.EZPZ_BACKEND_REPO || "../ezpz-studio");
+const backend = path.resolve(process.env.EZPZ_BACKEND_REPO || ".");
 const server = spawn(
   process.env.EZPZ_TEST_PYTHON || "python3",
   ["-m", "backend.server", "--root", root, "--port", String(port)],
@@ -90,6 +90,7 @@ try {
     await waitFor(`${browserUrl}/v1/ready`);
     await run("tests/browser.integration.ts", {
       STUDIO_BROWSER_URL: browserUrl,
+      STUDIO_TEST_DISPOSABLE: "1",
     });
   } else {
     await run("tests/api.integration.ts");

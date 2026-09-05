@@ -4,7 +4,7 @@ Thanks for helping make document extraction easier to inspect and improve. Small
 
 ## Before you start
 
-Follow the [README setup](README.md#quick-start). This repository owns the standalone frontend. Parsing, model adapters, scoring, SQLite persistence, and the HTTP API live in the separate `ezpz-studio` backend checkout.
+Follow the [README setup](README.md#quick-start). This repository contains the React frontend and the Python backend, including parsing, model adapters, scoring, SQLite persistence, and the HTTP API.
 
 For a substantial feature or an API contract change, open an issue explaining the problem and proposed behavior before investing in a large patch. Include the repository and commit you are testing when reporting an integration problem.
 
@@ -25,14 +25,24 @@ From this repository:
 ```bash
 npm test
 npm run build
-EZPZ_TEST_PYTHON=../ezpz-studio/.venv/bin/python npm run test:integration
+EZPZ_TEST_PYTHON=.venv/bin/python npm run test:integration
 ```
 
 Integration tests start a disposable backend with temporary storage. They do not use the live workspace database or make hosted model calls. Set `EZPZ_BACKEND_REPO` in the shell if your backend is elsewhere.
 
 For UI changes, also check the actual flow in a browser at desktop and narrow widths. Verify keyboard focus, readable labels, empty/error states, and long or nested extraction values. For evaluation changes, check group boundaries, repeated runs within one experiment, deep links, and the extracted-versus-expected inspector.
 
-The repository also contains `tests/browser.integration.ts` and a `test:e2e` script. Some selectors still target the earlier evaluation layout; that suite needs updating before it can be treated as a passing gate for the current hierarchy. The documented checks above and direct browser verification are the current validation path.
+The browser suite is an active gate:
+
+```bash
+.venv/bin/python -m unittest discover -s backend/tests
+npx playwright install chromium
+EZPZ_TEST_PYTHON=.venv/bin/python npm run test:e2e
+docker build -t ezpz-studio:0.1.0-beta.1 .
+npm run test:package
+```
+
+The package check runs the complete browser flow against the built image, then verifies restart recovery and backup restoration with disposable volumes. Never point the browser integration test at a real workspace. CI checks both ARM64 and AMD64 containers; hosted model quality needs separate, explicitly configured testing.
 
 ## Source map
 
@@ -53,7 +63,9 @@ The repository also contains `tests/browser.integration.ts` and a `test:e2e` scr
 | `src/components/extend/` | Extend UI components and local adaptations |
 | `src/styles.css` | Studio styling and responsive layouts |
 | `tests/` | Unit, API, store, and browser checks |
-| `patches/` | Compatibility changes for older backend checkouts |
+| `backend/` | HTTP API, persistence, parsing, extraction, evaluation, and Python tests |
+| `scripts/test-package.mjs` | Disposable container lifecycle and browser checks |
+| `patches/` | Historical compatibility patches; not needed by this checkout |
 
 ## Implementation expectations
 

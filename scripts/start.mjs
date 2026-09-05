@@ -6,7 +6,7 @@ import { loadEnv } from "vite";
 const root = path.resolve(import.meta.dirname, "..");
 const env = { ...loadEnv("development", root, ""), ...process.env };
 const backend = path.resolve(
-  env.EZPZ_BACKEND_REPO || path.join(root, "../ezpz-studio"),
+  env.EZPZ_BACKEND_REPO || root,
 );
 const endpoint = new URL(env.EZPZ_API_URL || "http://127.0.0.1:4173");
 const children = [];

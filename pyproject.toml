@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ezpz-evals"
+version = "0.1.0b1"
+description = "Local-first document extraction evaluation service"
+readme = "README.md"
+license = {file = "LICENSE"}
+requires-python = ">=3.10"
+dependencies = [
+  "Pillow>=10,<12",
+  "pypdf>=5,<7",
+  "PyYAML>=6,<7",
+]
+
+[project.scripts]
+ezpz = "ezpz:main"
+ezpz-server = "backend.server:main"
+
+[tool.setuptools]
+py-modules = ["ezpz", "server"]
+packages = ["backend", "backend.tests"]

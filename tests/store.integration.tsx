@@ -149,6 +149,13 @@ await act(async () => {
     true,
   );
 });
+await settle(
+  () =>
+    store!.runs.some(
+      (r) => r.name === "Store baseline" && r.status === "Completed",
+    ),
+  "background evaluation completes",
+);
 const run = store!.runs.find((r) => r.name === "Store baseline")!;
 assert.ok(run?.id);
 await act(async () => {

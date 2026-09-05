@@ -31,6 +31,16 @@ import {
 } from "./evaluation-model";
 
 function Delta({ run, baseline }: { run: Run; baseline?: Run }) {
+  const { mode } = useStudio();
+  if (
+    baseline &&
+    mode !== "demo" &&
+    (run.status.toLowerCase() !== "completed" ||
+      baseline.status.toLowerCase() !== "completed" ||
+      !run.benchmarkFingerprint ||
+      run.benchmarkFingerprint !== baseline.benchmarkFingerprint)
+  )
+    return <span className="eval-delta">—</span>;
   const change =
     run.score !== null && baseline?.score != null
       ? run.score - baseline.score
@@ -122,10 +132,16 @@ export function Evaluations() {
     .filter((r): r is Run => !!r);
   const baseline =
     representatives.find((r) => r.id === baselineIds[group?.id || ""]) ||
-    representatives.find((r) => r.score !== null) ||
+    representatives.find((r) => r.score !== null && r.status.toLowerCase() === "completed") ||
     representatives[0];
   const best = [...representatives]
-    .filter((r) => r.score !== null)
+    .filter(
+      (r) =>
+        r.score !== null && r.status.toLowerCase() === "completed" &&
+        (s.mode === "demo" ||
+          (baseline?.benchmarkFingerprint &&
+            r.benchmarkFingerprint === baseline.benchmarkFingerprint)),
+    )
     .sort((a, b) => b.score! - a.score!)[0];
   const choose = (id: string) =>
     setSelected((ids) =>
@@ -203,7 +219,12 @@ export function Evaluations() {
           title="Compare experiments"
           description={`${group.name} · ${datasetName}. Highlighted cells differ from the selected baseline.`}
         />
-        {runs.length >= 2 ? (
+        {runs.length >= 2 && runs.every(r => r.status.toLowerCase() === "completed") &&
+        (s.mode === "demo" ||
+          (runs[0].benchmarkFingerprint &&
+            runs.every(
+              (r) => r.benchmarkFingerprint === runs[0].benchmarkFingerprint,
+            ))) ? (
           <RunComparison
             key={hash}
             runs={runs}
@@ -220,8 +241,8 @@ export function Evaluations() {
           />
         ) : (
           <Empty
-            title="Select at least two runs"
-            description="Compare up to four runs from this evaluation group."
+            title="Choose runs from the same benchmark snapshot"
+            description="Select 2–4 completed runs made with identical documents and annotation revisions. Older runs without snapshots need to be run again."
             action={
               <Button onClick={() => go(groupPath)}>Choose experiments</Button>
             }
@@ -266,6 +287,8 @@ export function Evaluations() {
                       eval_experiment_id: experiment.id,
                       dataset_id: group.datasetId,
                       metadata: { name: experiment.name },
+                      force_refresh: true,
+                      background: true,
                     }),
                   });
                   await s.refresh();
@@ -864,6 +887,11 @@ function RunComparison({
     ["Parser", (r) => r.config?.parser || "Not recorded"],
     ["Documents", (r) => String(r.documents)],
     ["Status", (r) => r.status],
+    ["Cache hits", (r) => String(r.cacheHits ?? "Not recorded")],
+    [
+      "Benchmark snapshot",
+      (r) => r.benchmarkFingerprint?.slice(0, 12) || "Not recorded",
+    ],
     ["Latency", (r) => `${r.latency.toFixed(1)}s`],
     ["Cost", (r) => `$${r.cost.toFixed(3)}`],
     ["Prompt", (r) => r.config?.prompt || "Not recorded"],
@@ -975,7 +1003,7 @@ function EvaluationResults({ run }: { run: Run }) {
         if (!abort.signal.aborted) setLoading(false);
       });
     return () => abort.abort();
-  }, [run.id, attempt, s.mode]);
+  }, [run.id, attempt, s.mode, run.status, run.completedDocuments]);
   const failureCounts = new Map<string, number>();
   docs.forEach((d) =>
     d.fields
@@ -1032,6 +1060,65 @@ function EvaluationResults({ run }: { run: Run }) {
           </>
         }
       />
+      {["running", "cancelling"].includes(run.status.toLowerCase()) && (
+        <div className="evaluation-run-status" role="status">
+          <Busy
+            label={`${run.completedDocuments || 0} completed · ${run.failedDocuments || 0} failed / ${run.documents} documents`}
+          />
+          <Button
+            disabled={run.status === "cancelling"}
+            onClick={async () => {
+              try {
+                await api.request(`/runs/${encodeURIComponent(run.id)}/cancel`, {
+                  method: "POST",
+                });
+                await s.refresh();
+              } catch (error) {
+                s.notifyError(error);
+              }
+            }}
+          >
+            {" "}
+            {run.status === "cancelling"
+              ? "Stopping after current document…"
+              : "Cancel run"}
+          </Button>
+        </div>
+      )}
+      {(run.error ||
+        [
+          "failed",
+          "interrupted",
+          "cancelled",
+          "completed_with_failures",
+        ].includes(run.status.toLowerCase())) && (
+        <p className="form-error" role="alert">
+          {run.error ||
+            `Run ${run.status.replaceAll("_", " ")}. ${run.failedDocuments || 0} documents failed. Open the experiment to run it again.`}
+        </p>
+      )}
+      {!!snapshot?.metrics?.failures?.length && (
+        <details className="experiment-config">
+          <summary>
+            Document errors ({snapshot.metrics.failures.length})
+          </summary>
+          {snapshot.metrics.failures.map(
+            (f: { document_id: string; error: string }) => (
+              <p key={f.document_id}>
+                {s.documents.find((d) => d.id === f.document_id)?.name ||
+                  f.document_id}
+                : {f.error}
+              </p>
+            ),
+          )}
+        </details>
+      )}
+      <p className="eval-fixture-note">
+        Benchmark:{" "}
+        {run.benchmarkFingerprint?.slice(0, 12) || "Snapshot not recorded"} ·
+        Cache hits: {run.cacheHits ?? "Not recorded"}. New evaluation runs
+        request fresh extractions.
+      </p>
       <div className="eval-result-metrics">
         <span>
           Field accuracy <strong>{pct(run.score)}</strong>

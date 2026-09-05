@@ -6,3 +6,12 @@ test-results/
 playwright-report/
 public/vendor/*.wasm
 .local-test/
+
+backend/__pycache__/
+**/__pycache__/
+*.py[cod]
+.venv/
+.ezpz/
+release/
+*.egg-info/
+build/

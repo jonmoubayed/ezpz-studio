@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
 import { chromium, expect } from "@playwright/test";
 const base = process.env.STUDIO_BROWSER_URL;
-if (!base) throw new Error("Use npm run test:e2e for an isolated workspace.");
+if (!base || process.env.STUDIO_TEST_DISPOSABLE !== "1")
+  throw new Error("Use the isolated test:e2e or test:package runner.");
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1512, height: 1000 } });
 page.setDefaultTimeout(10000);
@@ -27,6 +28,11 @@ const schema = {
   required: ["invoice_number", "total"],
 };
 try {
+  assert.equal(
+    (await api("/documents")).documents.length,
+    0,
+    "Browser tests require an empty disposable workspace",
+  );
   await page.goto(`${base}/#Processors`);
   await expect(
     page.getByText("Local API connected", { exact: true }),
@@ -110,10 +116,16 @@ try {
   await page
     .getByRole("textbox", { name: "Expected values", exact: true })
     .fill(JSON.stringify({ invoice_number: "INV-2026-500", total: 80 }));
+  await select("Expected values dataset", "Create a new dataset…");
   await page
-    .getByRole("button", { name: "Save ground truth", exact: true })
+    .getByPlaceholder("e.g. Invoice regression cases")
+    .fill("Browser invoice benchmark");
+  await page
+    .getByRole("button", { name: "Add document & ground truth", exact: true })
     .click();
-  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(
+    page.getByRole("status").filter({ hasText: "Browser invoice benchmark" }),
+  ).toBeVisible();
   await page.reload();
   await expect(
     page.getByText("Local API connected", { exact: true }),
@@ -123,45 +135,58 @@ try {
     .click();
   await expect(
     page.getByRole("textbox", { name: "Expected values", exact: true }),
-  ).toContainText("80");
-  await page
-    .getByRole("dialog")
-    .getByRole("button", { name: "Close", exact: true })
-    .click();
-  await nav("Datasets");
-  await page.getByRole("button", { name: "New dataset", exact: true }).click();
-  await page.getByLabel("Dataset name").fill("Browser invoice benchmark");
-  await page
-    .getByRole("checkbox", { name: "browser-invoice.txt", exact: true })
-    .check();
-  await page
-    .getByRole("button", { name: "Create dataset", exact: true })
-    .click();
-  await expect(page.getByRole("dialog")).toHaveCount(0);
+  ).toHaveValue(/80/);
+  await page.getByRole("dialog").getByRole("button", {name:"Close",exact:true}).click();
   await nav("Evaluations");
+  await page.getByRole("button", { name: "New group", exact: true }).click();
   await page
-    .getByRole("button", { name: "New evaluation", exact: true })
+    .getByLabel("Group name", { exact: true })
+    .fill("Browser invoice iterations");
+  await page.getByRole("button", { name: "Create group", exact: true }).click();
+  await expect(
+    page.getByRole("heading", {
+      name: "Browser invoice iterations",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "New experiment", exact: true })
+    .first()
     .click();
-  await select("Evaluation group", "Create a new group…");
-  await page.getByLabel("Group name").fill("Browser invoice iterations");
+  await expect(
+    page.getByRole("combobox", { name: "Evaluation group", exact: true }),
+  ).toBeDisabled();
   await page
     .getByLabel("Experiment name", { exact: true })
     .fill("Browser baseline");
-  await select("Benchmark dataset", "Browser invoice benchmark (1 documents)");
   await select("Processor configuration", "Browser invoice extraction · v2");
   await page
     .getByRole("button", { name: "Run evaluation", exact: true })
     .click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect
+    .poll(
+      async () =>
+        (await api("/runs")).runs.find(
+          (r: any) => r.metadata?.name === "Browser baseline",
+        )?.status,
+    )
+    .toBe("completed");
   const run = (await api("/runs")).runs.find(
     (r: any) => r.metadata?.name === "Browser baseline",
   );
   assert.equal(run.metrics.field_accuracy, 0.5);
   await page
-    .getByRole("button", { name: "Browser baseline", exact: true })
+    .getByRole("link", { name: "Browser baseline", exact: true })
     .click();
   await expect(
     page.getByRole("heading", { name: "Browser baseline", exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("link", { name: `Run ${run.id.slice(-8)}`, exact: false })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: `Run ${run.id.slice(-8)}`, exact: true }),
   ).toBeVisible();
   await expect(page.locator(".evaluation-results-page")).toContainText("total");
   await page
@@ -210,14 +235,27 @@ try {
     .getByRole("button", { name: "Run candidate on benchmark", exact: true })
     .click();
   await expect(
-    page.getByRole("heading", { name: "Evaluations", exact: true }),
+    page.getByRole("heading", { name: "Evaluation groups", exact: true }),
   ).toBeVisible();
+  await expect
+    .poll(
+      async () =>
+        (await api("/runs")).runs.find(
+          (r: any) => r.metadata?.name === "Browser candidate",
+        )?.status,
+    )
+    .toBe("completed");
   const candidate = (await api("/runs")).runs.find(
     (r: any) => r.metadata?.name === "Browser candidate",
   );
   assert.equal(candidate.processor_version.processor_id, processor.id);
   assert.equal(candidate.eval_group_id, run.eval_group_id);
   assert.notEqual(candidate.processor_version.id, run.processor_version.id);
+  await page
+    .getByRole("link", {
+      name: /Browser invoice iterations Browser invoice benchmark/,
+    })
+    .click();
   await page
     .getByRole("checkbox", { name: "Compare Browser baseline", exact: true })
     .check();
@@ -289,7 +327,7 @@ try {
   ).toBeVisible();
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: Chromium UI through Vite proxy: processor/schema save, upload, side-by-side extraction, ground-truth reload, dataset creation, grouped evaluation, correction persistence, hill-climbing iterations, comparisons, annotated manifests, PDF rendering, and offline/reconnect.",
+    "PASS: Browser through the served application: processor/schema save, upload, side-by-side extraction, ground-truth reload, dataset creation, grouped evaluation, correction persistence, hill-climbing iterations, comparisons, annotated manifests, PDF rendering, and offline/reconnect.",
   );
 } catch (error) {
   await mkdir("test-results", { recursive: true });

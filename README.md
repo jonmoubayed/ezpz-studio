@@ -24,7 +24,7 @@ ezpz brings that loop into one workspace. Keep the source document beside your s
 
 You do not need an Extend account or an Extend extraction model. The studio uses open-source Extend UI components for document viewing and schema editing.
 
-> **Project status:** early development. This repository contains the standalone React frontend. Live extraction and persistence require the separate `ezpz-studio` Python backend; the setup below connects the two. A sample-only demo runs without a backend.
+> **Project status:** local, single-user beta — **0.1.0-beta.1**. This repository contains the complete React frontend and Python backend. Run the bundled Docker service, or develop both from this checkout. See [deployment and backups](docs/deployment.md) for installation and beta limits.
 
 ## What you can do
 
@@ -55,35 +55,28 @@ Demo mode uses labeled sample documents and scores. It makes no model calls. Nor
 
 ### Run your own workspace
 
-Use **Python 3.12** for the backend. Its package declares Python 3.10+, but the current upload handler depends on `cgi`, so use **3.10–3.12**, not 3.13+.
-
-Place the two source checkouts side by side:
-
-```text
-workspace/
-├── ezpz-studio/             # Python API, database, parsers, model adapters
-└── ezpz-studio-redesign/    # This frontend repository
-```
-
-From `ezpz-studio-redesign`:
+With Docker and Compose installed, run from this repository:
 
 ```bash
-# Install the backend dependencies in an isolated environment.
-python3.12 -m venv ../ezpz-studio/.venv
-../ezpz-studio/.venv/bin/python -m pip install -r ../ezpz-studio/requirements.txt
+docker compose up -d --build
+```
 
-# Install and start the studio.
+Open [ezpz studio](http://127.0.0.1:5180). The service includes the frontend, API, native PDF parser, and English OCR. Documents and results persist in a named Docker volume.
+
+Prebuilt ARM64 and AMD64 bundles also include the image: extract one and run `./start.sh` (macOS/Linux) or `./start.ps1` (Windows PowerShell). No source build or registry login is needed. See [deployment](docs/deployment.md) for credentials, alternate ports, backup/restore, and upgrades.
+
+To develop without Docker, use **Node.js 22.12+** and **Python 3.12**:
+
+```bash
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -r requirements.lock
 npm ci
 npm start
 ```
 
-Open [ezpz studio](http://127.0.0.1:5180).
+The launcher starts this checkout's backend on port 4173 and the frontend on 5180, or reuses an already-running API. Optional launcher overrides are documented in [Configuration](docs/configuration.md).
 
-`npm start` checks the API at `http://127.0.0.1:4173`, starts the sibling backend if needed, and launches the frontend on port `5180`. It uses the backend's `.venv/bin/python` when present. An existing backend is reused and left running when you stop the frontend.
-
-The workspace starts without sample documents. No provider key is needed to start the app. The bundled deterministic adapter is an invoice-oriented development fallback; configure an LLM for general extraction.
-
-For another checkout location, a different Python interpreter, or manual server startup, see [Configuration](docs/configuration.md).
+The workspace starts without sample documents. No provider key is needed to open it. Select the deterministic adapter explicitly for development fixtures; configure an LLM for general extraction.
 
 ### Your first useful experiment
 
@@ -109,9 +102,9 @@ A group opens into its own stats and experiment list. An experiment opens into i
 
 ![Dedicated evaluation group with benchmark context, accuracy and improvement stats, and experiment comparison controls](docs/images/evaluation-group.png)
 
-Group summaries use each experiment's latest completed run when available, falling back to its latest attempt. Comparisons stay within a group and show the saved configurations behind the selected runs.
+Group pages show experiment status and saved configurations. Comparisons require completed runs within the group that share the same recorded benchmark snapshot.
 
-**Keep the benchmark stable when measuring improvements.** Dataset membership and document annotations can change. Sharing a dataset ID does not guarantee two runs used identical documents or ground truth. Annotation edits affect future evaluations; historical results retain their recorded expectations.
+Each new evaluation freezes document membership and ground-truth revisions, and performs fresh extraction by default. Editing a dataset or annotation changes the next snapshot. Historical results retain their expectations; incompatible snapshots cannot be compared as the same benchmark.
 
 ### Confidence is not accuracy
 
@@ -125,14 +118,14 @@ The backend adapters support OpenAI, Anthropic, Google Gemini, Ollama, and OpenA
 
 Put provider credentials in the **backend's** environment or `.env` file, then restart the backend. Never put provider secrets in frontend `VITE_*` variables. See [provider configuration](docs/configuration.md#models-and-parsers) for the supported environment names and local endpoint setup.
 
-Missing credentials, unavailable optional dependencies, and some provider failures can trigger a local fallback. Read the warnings shown with a result before treating it as an evaluation of your selected model.
+Missing model credentials and provider failures produce explicit errors. The deterministic model is never silently substituted. Optional parser failures may still use compatibility parsing; inspect result warnings when evaluating parser behavior.
 
 ## Local hosting and data
 
 - Documents, ground truth, saved processor versions, runs, and review decisions persist in the backend's SQLite database and blob directory, normally `.ezpz/ezpz.db` and `.ezpz/blobs`.
 - Browser storage keeps working drafts, UI selections, and demo state. It is separate from the backend database.
 - Fonts and the PDF engine are served locally. Model and parser requests follow the providers you select: choosing a hosted service sends the relevant document content to that service.
-- The current servers are intended for a trusted local workspace. Authentication, multi-tenant access control, production deployment, and background job scheduling are not included. Keep the default loopback binding for local use.
+- The current servers are intended for a trusted local workspace. Authentication, multi-tenant access control, and distributed job scheduling are not included. Dataset evaluations run in the background with progress and cancellation. Keep the default loopback binding for local use.
 
 For backups, stop the backend and copy its database and blob directory together. Save any browser-only processor drafts as versions first. Keep credentials out of shared backups and issue attachments.
 
@@ -151,28 +144,27 @@ Stop the development server before using the preview on the same port. The previ
 Run the API and React store integration tests against a disposable backend:
 
 ```bash
-EZPZ_TEST_PYTHON=../ezpz-studio/.venv/bin/python npm run test:integration
+EZPZ_TEST_PYTHON=.venv/bin/python npm run test:integration
 ```
 
 The test runner creates a temporary database and blob directory and cleans them up afterward. It exercises upload, extraction, annotation, dataset membership, processor versions, evaluation groups, repeat runs, and feedback. It uses the deterministic adapter and makes no external model calls.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the source map, contribution workflow, test expectations, and browser-test status.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the source map, contribution workflow, test expectations, and container checks.
 
 ## Troubleshooting
 
 | Symptom | Check |
 | --- | --- |
 | Studio cannot connect | Start the backend and check [its readiness endpoint](http://127.0.0.1:4173/v1/ready). Verify `EZPZ_API_URL` and restart the frontend after changes. |
-| `ModuleNotFoundError: cgi` | Recreate the backend environment with Python 3.10–3.12. |
 | PDF parsing is unavailable | Install `requirements.txt` into the interpreter actually used by the backend. |
-| A selected model returns local results | Check backend credentials and extraction warnings. Restart the backend after updating its `.env`. |
+| A model request fails | Check provider credentials, endpoint, and model ID; restart after changing the environment. No fallback model is substituted. |
 | A field has no bounding box | Citations require grounding evidence from the parser/extraction. The studio does not invent source locations. |
 | Port `5180` is in use | Stop the other frontend process, or set `EZPZ_STUDIO_PORT` for `npm start`. |
-| A copied backend has old confidence or manifest behavior | Review the compatibility patches and application instructions in [Configuration](docs/configuration.md#backend-compatibility). |
+| Two runs cannot be compared | Both must be completed and use the same recorded benchmark snapshot. Older runs may not have one. |
 
 ## Current scope
 
-Hill climbing is a **manual experiment loop**, not an autonomous optimizer. Runs are synchronous. PDF, image, and text/CSV viewing are included; this frontend does not include dedicated DOCX or XLSX viewers. The local deterministic adapter is useful for development and tests, not a general-purpose document understanding model.
+Hill climbing is a **manual experiment loop**, not an autonomous optimizer. Dataset evaluations run in the background, one at a time. Cancellation waits for the current document; interrupted runs are identified after restart and can be rerun. PDF, image, and text/CSV viewing are included; this frontend does not include dedicated DOCX or XLSX viewers. The local deterministic adapter is useful for development and tests, not a general-purpose document understanding model.
 
 Demo metrics are fixtures. They should not be used in model comparisons, performance claims, or benchmark reports.
 

@@ -53,6 +53,11 @@ export const configPayload = (c: Config) => ({
 export function normalizeRun(r: any): Run {
   return {
     id: r.id,
+    benchmarkFingerprint: r.metadata?.benchmark_snapshot?.fingerprint,
+    cacheHits: r.metrics?.cache_hits,
+    completedDocuments: r.metrics?.completed,
+    failedDocuments: r.metrics?.failed,
+    error: r.error_text,
     groupId:
       r.eval_group?.id || r.eval_experiment?.eval_group?.id || r.eval_group_id,
     groupName: r.eval_group?.name || r.eval_experiment?.eval_group?.name,
@@ -78,7 +83,8 @@ export function normalizeRun(r: any): Run {
     score: r.metrics?.field_accuracy ?? null,
     cost: r.metrics?.cost_usd ?? 0,
     latency: (r.metrics?.average_latency_ms ?? 0) / 1000,
-    documents: r.extraction_count ?? r.extractions?.length ?? 0,
+    documents:
+      r.metrics?.documents ?? r.extraction_count ?? r.extractions?.length ?? 0,
     status: r.status === "completed" ? "Completed" : r.status,
     date: r.created_at,
     datasetId: r.dataset_id || "",
@@ -212,6 +218,7 @@ export async function runBenchmark(
   c: Config,
   name: string,
   group?: { id?: string; name?: string; processorId?: string },
+  background = false,
 ) {
   let groupId = group?.id;
   if (!groupId && !group?.name) {
@@ -257,6 +264,8 @@ export async function runBenchmark(
     eval_experiment_id: experiment.id,
     dataset_id: datasetId,
     metadata: { name },
+    force_refresh: true,
+    background,
   });
   return result.run ? normalizeRun(result.run) : null;
 }

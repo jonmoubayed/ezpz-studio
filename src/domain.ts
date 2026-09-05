@@ -61,6 +61,11 @@ export type EvalGroup = {
   description?: string;
 };
 export type Run = {
+  benchmarkFingerprint?: string;
+  cacheHits?: number;
+  completedDocuments?: number;
+  failedDocuments?: number;
+  error?: string;
   processorId?: string;
   groupId?: string;
   groupName?: string;

@@ -5112,3 +5112,15 @@ h1 {
     grid-template-columns: 150px minmax(0, 1fr) minmax(0, 1fr);
   }
 }
+
+.evaluation-run-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 16px;
+  margin-bottom: 16px;
+  background: var(--green-light);
+  border-radius: 8px;
+}

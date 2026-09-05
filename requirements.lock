@@ -1,0 +1,4 @@
+# Release runtime dependencies. Update deliberately and test both architectures.
+Pillow==11.3.0
+pypdf==6.17.0
+PyYAML==6.0.3

@@ -29,12 +29,9 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Virtualizer as DiffsVirtualizer } from "@pierre/diffs";
 import {
   File,
-  VirtualizerContext,
   WorkerPoolContextProvider,
-  type VirtualFileMetrics,
   type WorkerInitializationRenderOptions,
   type WorkerPoolOptions,
 } from "@pierre/diffs/react";
@@ -320,16 +317,6 @@ const CODE_FILE_THEME = {
   "--diffs-font-size": "0.8rem",
   "--diffs-line-height": "1.625",
 } as React.CSSProperties;
-const CODE_FONT_SIZE_PX = 12.8;
-const CODE_LINE_HEIGHT_PX = CODE_FONT_SIZE_PX * 1.625;
-const CODE_VIRTUAL_FILE_METRICS = {
-  hunkLineCount: 50,
-  lineHeight: CODE_LINE_HEIGHT_PX,
-  diffHeaderHeight: 44,
-  spacing: 8,
-  paddingTop: 0,
-  paddingBottom: 8,
-} satisfies VirtualFileMetrics;
 const CODE_HIGHLIGHTER_OPTIONS = {
   theme: {
     light: "pierre-light-soft",
@@ -343,70 +330,6 @@ const CODE_WORKER_POOL_OPTIONS = {
       type: "module",
     }),
 } satisfies WorkerPoolOptions;
-function ScrollAreaVirtualizer({
-  children,
-  className,
-  contentClassName,
-  contentStyle,
-  scrollFade = true,
-}: {
-  children: React.ReactNode;
-  className?: string;
-  contentClassName?: string;
-  contentStyle?: React.CSSProperties;
-  scrollFade?: boolean;
-}) {
-  const [virtualizer] = React.useState(() =>
-    typeof window !== "undefined" ? new DiffsVirtualizer() : undefined,
-  );
-  const viewportRef = React.useRef<HTMLDivElement | null>(null);
-  const contentRef = React.useRef<HTMLDivElement | null>(null);
-  const syncVirtualizer = React.useCallback(() => {
-    if (!virtualizer) return;
-    const viewport = viewportRef.current;
-    const content = contentRef.current;
-    if (viewport && content) {
-      virtualizer.setup(viewport, content);
-      return;
-    }
-    virtualizer.cleanUp();
-  }, [virtualizer]);
-  const setViewportRef = React.useCallback(
-    (node: HTMLDivElement | null) => {
-      viewportRef.current = node;
-      syncVirtualizer();
-    },
-    [syncVirtualizer],
-  );
-  const setContentRef = React.useCallback(
-    (node: HTMLDivElement | null) => {
-      contentRef.current = node;
-      syncVirtualizer();
-    },
-    [syncVirtualizer],
-  );
-  React.useEffect(() => {
-    return () => virtualizer?.cleanUp();
-  }, [virtualizer]);
-  return (
-    <VirtualizerContext.Provider value={virtualizer}>
-      <InlineScrollArea2
-        className={className}
-        scrollFade={scrollFade}
-        scrollbarOverflowOnly
-        viewportRef={setViewportRef}
-      >
-        <div
-          ref={setContentRef}
-          className={contentClassName}
-          style={contentStyle}
-        >
-          {children}
-        </div>
-      </InlineScrollArea2>
-    </VirtualizerContext.Provider>
-  );
-}
 const subscribeToHydration = () => () => {};
 function useResolvedCodeThemeType(theme?: SchemaBuilderTheme) {
   const { resolvedTheme } = useTheme();
@@ -2094,16 +2017,14 @@ export const SchemaJsonView = React.memo(function SchemaJsonView({
         poolOptions={CODE_WORKER_POOL_OPTIONS}
         highlighterOptions={CODE_HIGHLIGHTER_OPTIONS}
       >
-        <ScrollAreaVirtualizer
+        <InlineScrollArea2
           key={`${file.cacheKey}:${codeThemeType}:${String(scrollResetKey)}`}
           className="h-full min-w-0"
-          contentClassName="min-w-full"
         >
           <File
             key={`${file.cacheKey}:${codeThemeType}`}
             className="block min-w-full"
             file={file}
-            metrics={CODE_VIRTUAL_FILE_METRICS}
             style={CODE_FILE_THEME}
             options={{
               disableFileHeader: true,
@@ -2115,7 +2036,7 @@ export const SchemaJsonView = React.memo(function SchemaJsonView({
               },
             }}
           />
-        </ScrollAreaVirtualizer>
+        </InlineScrollArea2>
       </WorkerPoolContextProvider>
     </div>
   );
