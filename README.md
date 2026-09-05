@@ -127,3 +127,13 @@ Playground and processor configuration use equal-width document and editor/resul
 Extraction fields show **Result** and **Expected** together. The **Expected** tab edits document ground truth and can add that document to an existing or new evaluation dataset. Saving ground truth affects future evaluations; previously scored runs retain their saved expectations. Explicit null, false, and zero values remain distinct from unannotated fields.
 
 Source overlays use the backend’s normalized coordinates and retain multiple citations per field. Older absolute coordinates are converted using parser page dimensions. Fields without grounding evidence show no citation; selecting a cited field focuses its first source area.
+
+## Model-reported confidence
+
+New LLM extractions request `{ "value": ..., "confidence": 0.83 }` at each extraction leaf. Nested objects retain their structure; arrays receive one score for the whole array. Scores must be finite numbers from 0 to 1. Missing, malformed, and out-of-range scores remain null; the previous 75% fallback is removed.
+
+Badges distinguish **Model**, **Rule-based**, and **Sample** scores. Model confidence is an LLM self-assessment, not calibrated correctness or measured eval accuracy. Historical scores without source metadata show **Not provided**; run extraction again to obtain a new score. Historical runs remain unchanged, and the extraction cache version changes with the response contract.
+
+The backend changes and regression tests are captured in `patches/backend-llm-confidence.patch`. Apply this patch to another backend checkout before using the new confidence badges. Tests mock provider HTTP responses and verify the request contract, nested values, zero and missing confidence, persisted provenance, cache behavior, and unchanged local extraction flows without spending hosted model credits.
+
+Structured response schemas follow [OpenAI’s strict schema requirements](https://developers.openai.com/api/docs/guides/structured-outputs) and [Gemini’s JSON Schema response format](https://ai.google.dev/api/generate-content#generationconfig).

@@ -1,3 +1,4 @@
+import { confidenceFromResponse } from "./confidence";
 import { expectedValue, extractionCitations } from "./result-model";
 import type {
   Config,
@@ -104,7 +105,7 @@ export function extractionFields(e: any, groundTruth?: any): Field[] {
         key,
         value: v?.value ?? null,
         ...expectedValue(groundTruth?.value, key),
-        confidence: v?.confidence ?? 0,
+        ...confidenceFromResponse(v),
         citations,
         page: citations[0]?.page || 1,
         ...(citations[0] ? { area: citations[0].area } : {}),

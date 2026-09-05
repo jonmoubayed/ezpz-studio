@@ -1,0 +1,444 @@
+--- /dev/null
++++ b/backend/confidence.py
+@@ -0,0 +1,76 @@
++"""Per-field model confidence contract; never substitutes a default score."""
++from copy import deepcopy
++import math
++from typing import Any, Dict, Optional
++
++CONTRACT_VERSION = "field-confidence-v1"
++CONFIDENCE_INSTRUCTIONS = (
++    "Return JSON matching the response schema below. For every extraction leaf, return "
++    "{\"value\": <extracted value>, \"confidence\": <number from 0 to 1 or null>}. "
++    "Keep nested objects structured; arrays are one field whose value contains the original array. "
++    "Confidence is your self-assessment that the entire field value is correctly supported by the document, "
++    "not OCR quality or an evaluation score. Use high scores only for clear, direct evidence; lower scores "
++    "for ambiguity, conflicting evidence, inference, or incomplete arrays. Do not assign a fixed score to every field. "
++    "Use null for a value you cannot extract, and null confidence if you cannot assess it. "
++    "Do not invent evidence or use a default confidence."
++)
++
++
++def valid_confidence(value: Any) -> Optional[float]:
++    if isinstance(value, bool) or not isinstance(value, (int, float)):
++        return None
++    return float(value) if math.isfinite(value) and 0 <= value <= 1 else None
++
++
++def response_schema(schema: Dict[str, Any]) -> Dict[str, Any]:
++    """Wrap the same leaves canonicalization scores; keep user extraction schema untouched."""
++    if schema.get("type") == "object":
++        properties = {key: response_schema(value) for key, value in schema.get("properties", {}).items()}
++        return {**{key: deepcopy(schema[key]) for key in ("$defs", "definitions", "description") if key in schema},
++                "type": "object", "properties": properties,
++                "required": list(properties), "additionalProperties": False}
++    return {
++        "type": "object", "additionalProperties": False,
++        "properties": {
++            "value": {"anyOf": [deepcopy(schema), {"type": "null"}]},
++            "confidence": {"anyOf": [{"type": "number", "minimum": 0, "maximum": 1}, {"type": "null"}],
++                           "description": "Model-reported confidence in correctness of the entire field, from 0 to 1; null if unavailable."},
++        },
++        "required": ["value", "confidence"],
++    }
++
++
++def mark_model_confidence(output: Any, schema: Dict[str, Any]) -> Any:
++    # Apply provenance ourselves; never trust a confidence-source label emitted by a model.
++    if schema.get("type") == "object" and isinstance(output, dict):
++        return {key: mark_model_confidence(value, schema.get("properties", {}).get(key, {}))
++                for key, value in output.items()}
++    if isinstance(output, dict) and "value" in output:
++        score = valid_confidence(output.get("confidence"))
++        return {**output, "confidence": score, "confidence_source": "model_reported" if score is not None else None}
++    return output
++
++
++def strict_response_schema(schema: Dict[str, Any]) -> Dict[str, Any]:
++    """Adapt object values (including array items) to OpenAI's strict object contract."""
++    result = deepcopy(schema)
++    def visit(node: Any) -> None:
++        if not isinstance(node, dict):
++            return
++        if node.get("type") == "object":
++            props = node.get("properties", {})
++            required = node.get("required", [])
++            for key in props:
++                if key not in required:
++                    props[key] = {"anyOf": [props[key], {"type": "null"}]}
++            node["required"] = list(props)
++            node["additionalProperties"] = False
++        for key in ("properties", "$defs", "definitions"):
++            for child in node.get(key, {}).values():
++                visit(child)
++        visit(node.get("items"))
++        for key in ("anyOf", "oneOf", "allOf"):
++            for child in node.get(key, []):
++                visit(child)
++    visit(result)
++    return result
+--- a/backend/model.py
++++ b/backend/model.py
+@@ -5,6 +5,7 @@
+ import urllib.request
+ from typing import Any, Dict, List, Optional
+ 
++from .confidence import CONFIDENCE_INSTRUCTIONS, mark_model_confidence, response_schema, strict_response_schema
+ from .adapters import normalize_model_config, normalize_model_provider
+ from .models import DocumentIR, Evidence, ModelResult
+ 
+@@ -15,9 +16,10 @@
+ 
+ def extraction_text(schema: Dict[str, Any], prompt: Dict[str, Any], document_ir: DocumentIR) -> str:
+     """Render the shared extraction contract for text-oriented providers."""
+-    return "{}\n\nSchema:\n{}\n\nDocument:\n{}".format(
++    return "{}\n\n{}\n\nResponse schema:\n{}\n\nDocument:\n{}".format(
+         prompt.get("extraction") or DEFAULT_EXTRACTION_PROMPT,
+-        json.dumps(schema, ensure_ascii=False),
++        CONFIDENCE_INSTRUCTIONS,
++        json.dumps(response_schema(schema), ensure_ascii=False),
+         document_text(document_ir),
+     )
+ 
+@@ -95,7 +97,7 @@
+                         break
+                 if evidence:
+                     break
+-        return {"value": value, "confidence": confidence if value not in (None, "") else 0.0, "evidence": evidence}
++        return {"value": value, "confidence": confidence if value not in (None, "") else 0.0, "confidence_source": "heuristic", "evidence": evidence}
+ 
+ 
+ class AnthropicModel:
+@@ -142,7 +144,7 @@
+                 for item in payload.get("content", [])
+                 if item.get("type") == "text"
+             )
+-            parsed = _parse_json_response(text)
++            parsed = mark_model_confidence(_parse_json_response(text), schema)
+             return ModelResult(output=parsed, raw_response=payload, usage=payload.get("usage", {}), warnings=[])
+         except (urllib.error.URLError, TimeoutError, ValueError, KeyError) as error:
+             result = self.fallback.run(document_ir, schema, prompt)
+@@ -181,7 +183,7 @@
+         if self.provider == "openai" and prompt.get("structured_outputs"):
+             response_format = {
+                 "type": "json_schema",
+-                "json_schema": {"name": "extraction", "strict": True, "schema": schema},
++                "json_schema": {"name": "extraction", "strict": True, "schema": strict_response_schema(response_schema(schema))},
+             }
+         message: Dict[str, Any] = {
+             "model": self.model,
+@@ -222,7 +224,7 @@
+             text = payload["choices"][0]["message"]["content"]
+             if isinstance(text, list):
+                 text = "".join(item.get("text", "") for item in text if isinstance(item, dict))
+-            parsed = _parse_json_response(text)
++            parsed = mark_model_confidence(_parse_json_response(text), schema)
+             usage = payload.get("usage", {})
+             return ModelResult(
+                 output=parsed,
+@@ -254,7 +256,7 @@
+                 "temperature": float(prompt.get("temperature", 0)),
+                 "maxOutputTokens": int(prompt.get("max_tokens", 4096)),
+                 "responseMimeType": "application/json",
+-                **({"responseSchema": schema} if prompt.get("structured_outputs") else {}),
++                **({"responseJsonSchema": response_schema(schema)} if prompt.get("structured_outputs") else {}),
+             },
+         }
+ 
+@@ -275,7 +277,7 @@
+             with urllib.request.urlopen(request, timeout=60) as response:
+                 payload = json.loads(response.read().decode("utf-8"))
+             text = "".join(part.get("text", "") for part in payload["candidates"][0]["content"]["parts"])
+-            parsed = _parse_json_response(text)
++            parsed = mark_model_confidence(_parse_json_response(text), schema)
+             usage = payload.get("usageMetadata", {})
+             return ModelResult(
+                 output=parsed,
+--- a/backend/pipeline.py
++++ b/backend/pipeline.py
+@@ -7,6 +7,7 @@
+ from decimal import Decimal, InvalidOperation
+ from typing import Any, Dict, List, Optional, Tuple
+ 
++from .confidence import CONTRACT_VERSION, valid_confidence
+ from .db import Database
+ from .evaluation import aggregate_evaluations, score_extraction
+ from .harness import run_harness
+@@ -38,15 +39,15 @@
+     return fields
+ 
+ 
+-def _unwrap_value(raw: Any) -> Tuple[Any, float, List[Dict[str, Any]], List[str]]:
++def _unwrap_value(raw: Any) -> Tuple[Any, Optional[float], List[Dict[str, Any]], List[str]]:
+     if isinstance(raw, dict) and "value" in raw:
+         return (
+             raw.get("value"),
+-            float(raw.get("confidence") or 0),
++            valid_confidence(raw.get("confidence")),
+             raw.get("evidence") or [],
+             raw.get("errors") or [],
+         )
+-    return raw, 0.0 if raw in (None, "") else 0.75, [], []
++    return raw, None, [], []
+ 
+ 
+ def _normalize(value: Any, definition: Dict[str, Any]) -> Any:
+@@ -179,12 +180,13 @@
+         fields[path] = FieldResult(
+             value=value,
+             normalized_value=_normalize(value, definition),
+-            confidence=max(0.0, min(1.0, confidence)),
++            confidence=confidence,
+             evidence=evidence,
+             errors=errors,
+             provenance={
+                 "processor_version_id": processor_version["id"],
+                 "model": model_name,
++                "confidence_source": raw.get("confidence_source") if isinstance(raw, dict) and confidence is not None else None,
+                 "parser": parser_ir.parser,
+             },
+         )
+@@ -339,15 +341,16 @@
+                 extraction["processor_version"] = processor_version
+                 evaluation = score_extraction(extraction, self.database.get_ground_truth(document_id), processor_version.get("schema", {}), scoring_config)
+                 extraction["evaluation"] = evaluation
++            confidences = [item.confidence for item in canonical.fields.values() if item.confidence is not None]
+             metrics = {
+                 "documents": 1,
+                 "completed": 1,
+                 "failed": 0,
+                 "field_count": len(canonical.fields),
+                 "average_confidence": round(
+-                    sum(item.confidence for item in canonical.fields.values()) / max(1, len(canonical.fields)),
++                    sum(confidences) / len(confidences),
+                     4,
+-                ),
++                ) if confidences else None,
+                 "latency_ms": latency_ms,
+                 "cost_usd": extraction["cost_usd"],
+                 "cache_hits": 0,
+@@ -536,6 +539,7 @@
+             # Bump when parser IR geometry changes; cached results must not
+             # preserve stale layout boxes after a parser fix.
+             "cache_schema": 2,
++            "response_contract": CONTRACT_VERSION,
+         }
+         return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+ 
+--- a/backend/models.py
++++ b/backend/models.py
+@@ -34,7 +34,7 @@
+ class FieldResult:
+     value: Any
+     normalized_value: Any
+-    confidence: float
++    confidence: Optional[float]
+     evidence: List[Evidence] = field(default_factory=list)
+     errors: List[str] = field(default_factory=list)
+     provenance: Dict[str, Any] = field(default_factory=dict)
+--- a/backend/harness.py
++++ b/backend/harness.py
+@@ -10,6 +10,7 @@
+ from dataclasses import dataclass, field
+ from typing import Any, Callable, Dict, List, Optional
+ 
++from .confidence import valid_confidence
+ from .models import DocumentIR, DocumentPage, ModelResult
+ 
+ 
+@@ -59,8 +60,8 @@
+         return incoming
+     if isinstance(current, dict) and isinstance(incoming, dict):
+         if "value" in current or "value" in incoming:
+-            current_confidence = float(current.get("confidence") or 0)
+-            incoming_confidence = float(incoming.get("confidence") or 0)
++            current_confidence = (valid_confidence(current.get("confidence")) or 0)
++            incoming_confidence = (valid_confidence(incoming.get("confidence")) or 0)
+             winner = incoming if incoming_confidence > current_confidence and incoming.get("value") not in (None, "") else current
+             result = dict(winner)
+             evidence = []
+@@ -75,7 +76,8 @@
+                     errors.append(item)
+             if errors:
+                 result["errors"] = errors
+-            result["confidence"] = max(current_confidence, incoming_confidence)
++            # Preserve the chosen value’s own confidence, including a missing score.
++            result["confidence"] = valid_confidence(winner.get("confidence"))
+             return result
+         result = dict(current)
+         for key, value in incoming.items():
+@@ -200,19 +202,19 @@
+ 
+ def _confidence(output: Any) -> float:
+     scores: List[float] = []
+-    if isinstance(output, dict):
+-        if "value" in output:
+-            scores.append(float(output.get("confidence") or 0))
+-        else:
+-            for value in output.values():
+-                score = _confidence(value)
+-                if score:
++    def collect(value: Any) -> None:
++        if isinstance(value, dict):
++            if "value" in value and "confidence" in value and not isinstance(value.get("confidence"), dict):
++                score = valid_confidence(value.get("confidence"))
++                if score is not None:
+                     scores.append(score)
+-    elif isinstance(output, list):
+-        for value in output:
+-            score = _confidence(value)
+-            if score:
+-                scores.append(score)
++            else:
++                for item in value.values():
++                    collect(item)
++        elif isinstance(value, list):
++            for item in value:
++                collect(item)
++    collect(output)
+     return sum(scores) / len(scores) if scores else 0.0
+ 
+ 
+--- a/backend/db.py
++++ b/backend/db.py
+@@ -1204,7 +1204,7 @@
+         result["processor_version"] = self.get_processor_version(row["processor_version_id"])
+         result["fields"] = {}
+         for field in self._all("SELECT * FROM extraction_fields WHERE extraction_id = ? ORDER BY field_path", (row["id"],)):
+-            result["fields"][field["field_path"]] = {"value": _json(field["value_json"], None), "normalized_value": _json(field["normalized_value_json"], None), "confidence": field["confidence"], "evidence": _json(field["evidence_json"], []), "errors": _json(field["errors_json"], [])}
++            result["fields"][field["field_path"]] = {"provenance": (result.get("result", {}).get("fields", {}).get(field["field_path"], {}).get("provenance") or {}), "value": _json(field["value_json"], None), "normalized_value": _json(field["normalized_value_json"], None), "confidence": field["confidence"], "evidence": _json(field["evidence_json"], []), "errors": _json(field["errors_json"], [])}
+         evaluation = self.get_evaluation_for_extraction(row["id"])
+         if evaluation:
+             result["evaluation"] = evaluation
+--- a/backend/tests/test_adapters.py
++++ b/backend/tests/test_adapters.py
+@@ -1,5 +1,6 @@
+ import unittest
+ 
++from backend.confidence import response_schema, strict_response_schema
+ from backend.adapters import get_adapter_catalog, normalize_model_config, normalize_parser_name
+ from backend.model import AnthropicModel, GeminiModel, OpenAICompatibleModel, create_model_adapter
+ from backend.models import DocumentBlock, DocumentIR, DocumentPage
+@@ -60,7 +61,7 @@
+         schema = {"type": "object", "properties": {"value": {"type": "string"}}}
+         payload = model.request_payload(sample_ir(), schema, {"structured_outputs": True})
+         self.assertEqual(payload["response_format"]["type"], "json_schema")
+-        self.assertEqual(payload["response_format"]["json_schema"]["schema"], schema)
++        self.assertEqual(payload["response_format"]["json_schema"]["schema"], strict_response_schema(response_schema(schema)))
+ 
+ 
+ if __name__ == "__main__":
+--- /dev/null
++++ b/backend/tests/test_confidence.py
+@@ -0,0 +1,111 @@
++import copy
++import io
++import json
++import os
++import unittest
++from pathlib import Path
++from tempfile import TemporaryDirectory
++from unittest.mock import patch
++
++from backend.confidence import mark_model_confidence, response_schema, strict_response_schema, valid_confidence
++from backend.harness import _confidence, _merge_values
++from backend.model import AnthropicModel, GeminiModel, OpenAICompatibleModel
++from backend.pipeline import canonicalize, ExtractionService
++from backend.server import create_runtime
++from backend.tests.test_adapters import sample_ir
++
++SCHEMA = {"type": "object", "properties": {
++    "total": {"type": "number"}, "approved": {"type": "boolean"},
++    "vendor": {"type": "object", "properties": {"name": {"type": "string"}}},
++    "items": {"type": "array", "items": {"type": "object", "properties": {"price": {"type": "number"}}}},
++}}
++OUTPUT = {"total": {"value": 25, "confidence": .83}, "approved": {"value": False, "confidence": 0},
++          "vendor": {"name": {"value": "Acme", "confidence": .94}},
++          "items": {"value": [{"price": 25}], "confidence": .68}}
++
++
++class ConfidenceTests(unittest.TestCase):
++    def test_contract_preserves_nested_and_array_values_and_original_schema(self):
++        original = copy.deepcopy(SCHEMA)
++        wrapped = response_schema(SCHEMA)
++        self.assertEqual(wrapped['properties']['items']['properties']['value']['anyOf'][0], SCHEMA['properties']['items'])
++        self.assertIn('confidence', wrapped['properties']['vendor']['properties']['name']['properties'])
++        strict = strict_response_schema(wrapped)
++        array_item = strict['properties']['items']['properties']['value']['anyOf'][0]['items']
++        self.assertFalse(array_item['additionalProperties'])
++        self.assertEqual(array_item['required'], ['price'])
++        self.assertEqual(SCHEMA, original)
++
++    def test_invalid_or_missing_scores_remain_unknown(self):
++        for value in [None, True, False, '0.8', '85%', -1, 1.1, float('nan'), float('inf')]:
++            self.assertIsNone(valid_confidence(value))
++        self.assertEqual(valid_confidence(0), 0)
++        self.assertEqual(valid_confidence(1), 1)
++        for raw in [25, {"value": 25}, {"value": 25, "confidence": 'high'}]:
++            result = canonicalize({'total': raw}, SCHEMA, {'id': 'pv'}, sample_ir(), 'test').to_dict()
++            self.assertIsNone(result['fields']['total']['confidence'])
++            self.assertIsNone(result['fields']['total']['provenance']['confidence_source'])
++
++    def test_adapters_request_and_parse_confidence_without_external_calls(self):
++        text = json.dumps(OUTPUT)
++        cases = [
++            (OpenAICompatibleModel(api_key='test'), {'choices': [{'message': {'content': text}}]}, 'messages'),
++            (OpenAICompatibleModel(provider='ollama', api_key='test', requires_api_key=False), {'choices': [{'message': {'content': text}}]}, 'messages'),
++            (AnthropicModel(api_key='test'), {'content': [{'type': 'text', 'text': text}]}, 'messages'),
++            (GeminiModel(api_key='test'), {'candidates': [{'content': {'parts': [{'text': text}]}}]}, 'contents'),
++        ]
++        for adapter, response, messages_key in cases:
++            with self.subTest(provider=adapter.provider), patch('urllib.request.urlopen', return_value=io.BytesIO(json.dumps(response).encode())) as request:
++                result = adapter.run(sample_ir(), SCHEMA, {})
++                body = json.loads(request.call_args[0][0].data)
++                self.assertIn('confidence', json.dumps(body[messages_key]))
++                self.assertEqual(result.output['total']['confidence'], .83)
++                self.assertEqual(result.output['total']['confidence_source'], 'model_reported')
++                self.assertEqual(result.output['approved']['confidence'], 0)
++                canonical = canonicalize(result.output, SCHEMA, {'id': 'pv'}, sample_ir(), adapter.name).to_dict()
++                self.assertEqual(canonical['fields']['vendor.name']['confidence'], .94)
++                self.assertEqual(canonical['fields']['items']['value'], [{'price': 25}])
++        forged = mark_model_confidence({'total': {'value': 25, 'confidence': .83, 'confidence_source': 'heuristic'}}, SCHEMA)
++        self.assertEqual(forged['total']['confidence_source'], 'model_reported')
++
++    def test_confidence_persists_and_cache_reuses_verified_metadata(self):
++        with TemporaryDirectory() as directory, patch.dict(os.environ, {'EZPZ_SEED_DEMO': 'false'}):
++            runtime = create_runtime(Path(directory))
++            db = runtime.database
++            doc = runtime.ingestor.ingest('confidence.txt', b'Total: $25.00', 'text/plain')['document']
++            db.upsert_processor_draft('invoice-extractor', {'schema': SCHEMA, 'parser': {'name': 'native'}, 'model': {'provider': 'openai', 'name': 'test-model'}})
++            version = db.publish_processor_draft('invoice-extractor')
++            adapter = OpenAICompatibleModel(api_key='test', model='test-model')
++            response = {'choices': [{'message': {'content': json.dumps(OUTPUT)}}]}
++            with patch.object(runtime.extractions, '_model', return_value=adapter), patch('urllib.request.urlopen', return_value=io.BytesIO(json.dumps(response).encode())) as request:
++                extracted = runtime.extractions.extract_document(doc['id'])
++                saved = db.get_extraction(extracted['id'])
++                field = saved['result']['fields']['total']
++                self.assertEqual(field['confidence'], .83)
++                self.assertEqual(field['provenance']['confidence_source'], 'model_reported')
++                self.assertEqual(saved['fields']['total']['confidence'], .83)
++                self.assertEqual(saved['fields']['total']['provenance']['confidence_source'], 'model_reported')
++                self.assertEqual(saved['raw_response'], response)
++                cached = runtime.extractions.extract_document(doc['id'])
++                self.assertTrue(cached['cache_hit'])
++                self.assertEqual(cached['result']['fields']['total']['provenance']['confidence_source'], 'model_reported')
++                self.assertEqual(request.call_count, 1)
++            # A plain response no longer acquires a default 75%, including aggregate metrics.
++            with patch.object(runtime.extractions, '_model', return_value=adapter), patch('urllib.request.urlopen', return_value=io.BytesIO(json.dumps({'choices': [{'message': {'content': '{"total":25}'}}]}).encode())):
++                missing = runtime.extractions.extract_document(doc['id'], force_refresh=True)
++                self.assertIsNone(missing['result']['fields']['total']['confidence'])
++                self.assertIsNone(missing['run']['metrics']['average_confidence'])
++            legacy_key = __import__('hashlib').sha256(json.dumps({'document_sha256':doc['sha256'], 'processor_version_id':version['id'], 'cache_schema':2}, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
++            self.assertNotEqual(ExtractionService._cache_key(doc, version), legacy_key)
++
++    def test_harness_preserves_unknown_and_zero_confidence(self):
++        self.assertEqual(_confidence({'value': {'value': 'test', 'confidence': .6}}), .6)
++        self.assertEqual(_confidence({'a': {'value': 1, 'confidence': 0}, 'b': {'value': 2, 'confidence': 1}}), .5)
++        self.assertIsNone(_merge_values({'value': 1}, {'value': 2})['confidence'])
++        merged = _merge_values({'value': 1, 'confidence': .2}, {'value': None, 'confidence': .9})
++        self.assertEqual(merged['value'], 1)
++        self.assertEqual(merged['confidence'], .2)
++
++
++if __name__ == '__main__':
++    unittest.main()

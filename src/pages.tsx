@@ -1,3 +1,4 @@
+import { isLowConfidence } from "./confidence";
 import { FieldSelect } from "./components/field-select";
 import { useState } from "react";
 import {
@@ -202,7 +203,7 @@ export function Overview() {
     .flatMap((d) =>
       d.fields.filter(
         (f) =>
-          (f.confidence < 0.9 ||
+          (isLowConfidence(f) ||
             (f.status && !["correct", "unscored"].includes(f.status))) &&
           !s.reviews.some(
             (r) =>

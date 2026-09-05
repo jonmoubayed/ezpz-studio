@@ -52,7 +52,12 @@ export function evaluationDocuments(
       const prediction = predictions.find((f) => f.key === key);
       const score = ev?.fields?.[key];
       return {
-        ...(prediction ?? { key, value: null, expected: null, confidence: 0 }),
+        ...(prediction ?? {
+          key,
+          value: null,
+          expected: null,
+          confidence: null,
+        }),
         value:
           score && Object.hasOwn(score, "actual")
             ? score.actual

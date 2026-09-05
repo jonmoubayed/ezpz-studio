@@ -1,3 +1,4 @@
+import { isLowConfidence } from "./confidence";
 import { lazy, Suspense, useEffect, useState } from "react";
 import {
   Activity,
@@ -70,7 +71,7 @@ export default function App() {
       d.fields.filter(
         (f) =>
           (s.mode === "demo" || !!d.runId) &&
-          (f.confidence < 0.9 ||
+          (isLowConfidence(f) ||
             (f.status && f.status !== "correct" && f.status !== "unscored")) &&
           !s.reviews.some(
             (r) =>

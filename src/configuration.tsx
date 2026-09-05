@@ -1,3 +1,4 @@
+import { ConfidenceBadge } from "./ui";
 import { ExpectedValuesEditor, FieldValues } from "./expected-values";
 import { withExpectedValues } from "./result-model";
 import { FieldSelect } from "./components/field-select";
@@ -543,9 +544,7 @@ function ProcessorPreview({
               >
                 <span>
                   <strong>{f.key}</strong>
-                  <Badge tone={f.confidence < 0.9 ? "orange" : "green"}>
-                    {Math.round(f.confidence * 100)}%
-                  </Badge>
+                  <ConfidenceBadge field={f} />
                 </span>
                 <FieldValues field={f} />
                 <small>

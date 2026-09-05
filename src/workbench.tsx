@@ -1,3 +1,4 @@
+import { isLowConfidence } from "./confidence";
 import { ExpectedValuesEditor, FieldValues } from "./expected-values";
 import { FieldSelect } from "./components/field-select";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
@@ -38,7 +39,15 @@ const PDFViewer = lazy(() =>
   })),
 );
 import { HumanReviewHighlight } from "./components/extend/human-review-highlight";
-import { Button, Badge, Busy, Empty, Heading, Modal } from "./ui";
+import {
+  ConfidenceBadge,
+  Button,
+  Badge,
+  Busy,
+  Empty,
+  Heading,
+  Modal,
+} from "./ui";
 import { useStudio } from "./store";
 import { ModelMark } from "./pages";
 import {
@@ -428,7 +437,7 @@ export function Playground() {
                     {d.fields.map((f) => (
                       <button
                         key={f.key}
-                        className={`field-card ${active === f.key ? "selected" : ""} ${f.confidence < 0.9 ? "uncertain" : ""}`}
+                        className={`field-card ${active === f.key ? "selected" : ""} ${isLowConfidence(f) ? "uncertain" : ""}`}
                         onClick={() => setActive(f.key)}
                       >
                         <div>
@@ -438,16 +447,7 @@ export function Playground() {
                             </span>
                             {f.key}
                           </span>
-                          <span
-                            className={`confidence ${f.confidence < 0.9 ? "low" : ""}`}
-                          >
-                            {f.confidence < 0.9 ? (
-                              <Flag size={11} />
-                            ) : (
-                              <Check size={11} />
-                            )}{" "}
-                            {(f.confidence * 100).toFixed(0)}%
-                          </span>
+                          <ConfidenceBadge field={f} />
                         </div>
                         <FieldValues field={f} />
                         <small>
@@ -563,7 +563,7 @@ export function ReviewQueue() {
         .filter(
           (f) =>
             filter === "all" ||
-            f.confidence < 0.9 ||
+            isLowConfidence(f) ||
             (s.mode === "live" &&
               f.status &&
               f.status !== "correct" &&
@@ -752,14 +752,7 @@ export function ReviewQueue() {
               </span>
             </div>
             <div className="decision-body">
-              <Badge tone={current.f.confidence < 0.9 ? "orange" : "green"}>
-                {current.f.confidence < 0.9 ? (
-                  <Flag size={12} />
-                ) : (
-                  <Check size={12} />
-                )}{" "}
-                {Math.round(current.f.confidence * 100)}% confidence
-              </Badge>
+              <ConfidenceBadge field={current.f} />
               <h2>{current.f.key}</h2>
               <p>Check this value against the highlighted source.</p>
               <div className="review-values">

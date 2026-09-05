@@ -27,7 +27,8 @@ export type Field = {
   key: string;
   value: JsonValue;
   expected: JsonValue;
-  confidence: number;
+  confidence: number | null;
+  confidenceSource?: "model_reported" | "heuristic" | "sample";
   status?: string;
   area?: { left: number; top: number; width: number; height: number };
   page?: number;
@@ -133,6 +134,7 @@ export const sampleDocuments: Document[] = vendors.map((vendor, i) => ({
       key: "invoice_number",
       value: `INV-2026-00${i + 1}`,
       expected: `INV-2026-00${i + 1}`,
+      confidenceSource: "sample",
       confidence: 0.99,
       area: { left: 65, top: 14, width: 25, height: 3 },
     },
@@ -140,6 +142,7 @@ export const sampleDocuments: Document[] = vendors.map((vendor, i) => ({
       key: "vendor",
       value: vendor,
       expected: vendor,
+      confidenceSource: "sample",
       confidence: 0.99,
       area: { left: 9, top: 9, width: 50, height: 4 },
     },
@@ -147,6 +150,7 @@ export const sampleDocuments: Document[] = vendors.map((vendor, i) => ({
       key: "invoice_date",
       value: "2026-09-01",
       expected: "2026-09-01",
+      confidenceSource: "sample",
       confidence: 0.98,
       area: { left: 65, top: 21, width: 25, height: 3 },
     },
@@ -154,6 +158,7 @@ export const sampleDocuments: Document[] = vendors.map((vendor, i) => ({
       key: "due_date",
       value: "2026-09-30",
       expected: "2026-09-30",
+      confidenceSource: "sample",
       confidence: 0.97,
       area: { left: 65, top: 27, width: 25, height: 3 },
     },
@@ -161,6 +166,7 @@ export const sampleDocuments: Document[] = vendors.map((vendor, i) => ({
       key: "subtotal",
       value: 2400 + i * 180,
       expected: 2400 + i * 180,
+      confidenceSource: "sample",
       confidence: 0.99,
       area: { left: 68, top: 64, width: 23, height: 3 },
     },
@@ -168,6 +174,7 @@ export const sampleDocuments: Document[] = vendors.map((vendor, i) => ({
       key: "tax",
       value: i === 1 ? 180 : (2400 + i * 180) * 0.08,
       expected: (2400 + i * 180) * 0.08,
+      confidenceSource: "sample",
       confidence: i === 1 ? 0.72 : 0.99,
       area: { left: 68, top: 68, width: 23, height: 3 },
     },
@@ -175,6 +182,7 @@ export const sampleDocuments: Document[] = vendors.map((vendor, i) => ({
       key: "total",
       value: Number(((2400 + i * 180) * 1.08).toFixed(2)),
       expected: Number(((2400 + i * 180) * 1.08).toFixed(2)),
+      confidenceSource: "sample",
       confidence: i === 4 ? 0.78 : 0.99,
       area: { left: 65, top: 73, width: 27, height: 5 },
     },

@@ -1,3 +1,10 @@
+import {
+  confidenceLabel,
+  confidenceDescription,
+  isLowConfidence,
+  hasConfidence,
+} from "./confidence";
+import type { Field } from "./domain";
 import type { ReactNode } from "react";
 import { ArrowUpRight, ChevronRight, Loader2, X } from "lucide-react";
 import {
@@ -203,5 +210,21 @@ export function Notice({
         </button>
       )}
     </div>
+  );
+}
+
+export function ConfidenceBadge({ field }: { field: Field }) {
+  return (
+    <span
+      className={`badge ${isLowConfidence(field) ? "orange" : "neutral"}`}
+      title={confidenceDescription(field)}
+      aria-label={
+        hasConfidence(field)
+          ? `${confidenceLabel(field)} confidence`
+          : "Confidence not provided"
+      }
+    >
+      {confidenceLabel(field)}
+    </span>
   );
 }
