@@ -500,13 +500,15 @@ export function Playground() {
               </div>
             ) : null}
             <div className="results-footer">
-              <Button
-                disabled={s.busy}
-                onClick={() => setGroundTruthOpen(true)}
-              >
-                <CheckCheck size={14} />
-                Edit ground truth
-              </Button>
+              {tab !== "Expected" && (
+                <Button
+                  disabled={s.busy}
+                  onClick={() => setGroundTruthOpen(true)}
+                >
+                  <CheckCheck size={14} />
+                  Edit ground truth
+                </Button>
+              )}
               <button
                 className="icon-button"
                 aria-label="Copy extraction JSON"
@@ -537,9 +539,9 @@ export function Playground() {
           <ExpectedValuesEditor
             key={d.id}
             document={d}
-            onSaved={() => {
+            onSaved={(message) => {
               setGroundTruthOpen(false);
-              s.setMessage("Document ground truth saved.");
+              s.setMessage(message);
             }}
           />
         )}

@@ -1,4 +1,8 @@
-import { withExpectedValues, expectedValues } from "./result-model";
+import {
+  withExpectedValues,
+  expectedValues,
+  equalValues,
+} from "./result-model";
 import React, {
   createContext,
   useContext,
@@ -29,6 +33,13 @@ import {
   evaluationDocuments,
   demoEvaluationDocuments,
 } from "./evaluation-model";
+export type ExpectedSaveResult = {
+  ok: boolean;
+  groundTruthSaved: boolean;
+  dataset?: Dataset;
+  alreadyMember?: boolean;
+  error?: string;
+};
 type Review = {
   documentId: string;
   field: string;
@@ -618,51 +629,109 @@ function useStore() {
     d: Document,
     value: Record<string, JsonValue>,
     target?: { id?: string; name?: string },
-  ) {
+  ): Promise<ExpectedSaveResult> {
+    setMessage("");
     setBusy(true);
+    let groundTruthSaved = false;
+    let dataset: Dataset | undefined;
+    let alreadyMember = false;
     try {
       if (mode === "live") {
-        await api.saveGroundTruth(d.id, value);
+        const saved = await api.saveGroundTruth(d.id, value);
+        if (!equalValues(saved.ground_truth?.value ?? null, value))
+          throw new Error(
+            "The API did not confirm the expected values. Please retry.",
+          );
+        groundTruthSaved = true;
         updateExpectedValues(d.id, value);
-        if (target?.id) await api.addDatasetDocument(target.id, d.id);
-        else if (target?.name)
-          await api.createDataset(target.name.trim(), [d.id]);
-        if (target) await refresh();
+        if (target) {
+          if (target.id) {
+            const data = await api.request(
+              `/datasets/${encodeURIComponent(target.id)}`,
+            );
+            dataset = {
+              id: data.dataset.id,
+              name: data.dataset.name,
+              description: data.dataset.description || "",
+              count: data.documents.length,
+              members: data.documents.map((doc: any) => doc.id),
+            };
+            alreadyMember = dataset.members!.includes(d.id);
+          } else {
+            const created = await api.createDataset(target.name!.trim(), []);
+            dataset = {
+              id: created.id,
+              name: created.name,
+              description: created.description || "",
+              count: 0,
+              members: [],
+            };
+            // Keep the created ID even if adding the document fails, so retry cannot create another dataset.
+            setDatasets((ds) => [
+              ...ds.filter((item) => item.id !== dataset!.id),
+              dataset!,
+            ]);
+          }
+          // An existing member only needs its ground truth updated; preserve its split and tags.
+          if (!alreadyMember) await api.addDatasetDocument(dataset.id, d.id);
+          const { manifest } = await api.request(
+            `/datasets/${encodeURIComponent(dataset.id)}/manifest`,
+          );
+          const member = manifest.documents.find(
+            (doc: any) => doc.document_id === d.id,
+          );
+          if (!member || !equalValues(member.ground_truth, value))
+            throw new Error(
+              "Could not verify this document and its expected values in the dataset. Please retry.",
+            );
+          dataset = {
+            ...dataset,
+            count: manifest.documents.length,
+            members: manifest.documents.map((doc: any) => doc.document_id),
+          };
+          setDatasets((ds) => [
+            ...ds.filter((item) => item.id !== dataset!.id),
+            dataset!,
+          ]);
+        }
       } else {
         updateExpectedValues(d.id, value);
-        if (target?.id)
-          setDatasets((ds) =>
-            ds.map((dataset) => {
-              if (dataset.id !== target.id) return dataset;
-              const members = [
-                ...new Set([
-                  ...(dataset.members ||
-                    documents
-                      .filter((doc) => doc.sample)
-                      .slice(0, dataset.count)
-                      .map((doc) => doc.id)),
-                  d.id,
-                ]),
-              ];
-              return { ...dataset, members, count: members.length };
-            }),
-          );
-        else if (target?.name)
+        groundTruthSaved = true;
+        if (target) {
+          const current = datasets.find((item) => item.id === target.id);
+          if (target.id && !current)
+            throw new Error("Dataset not found. Choose another dataset.");
+          const members =
+            current?.members ||
+            (current
+              ? documents
+                  .filter((doc) => doc.sample)
+                  .slice(0, current.count)
+                  .map((doc) => doc.id)
+              : []);
+          alreadyMember = members.includes(d.id);
+          const nextMembers = [...new Set([...members, d.id])];
+          dataset = {
+            id: current?.id || crypto.randomUUID(),
+            name: current?.name || target.name!.trim(),
+            description: current?.description || "Added from expected values",
+            count: nextMembers.length,
+            members: nextMembers,
+          };
           setDatasets((ds) => [
-            ...ds,
-            {
-              id: crypto.randomUUID(),
-              name: target.name!.trim(),
-              description: "Added from expected values",
-              count: 1,
-              members: [d.id],
-            },
+            ...ds.filter((item) => item.id !== dataset!.id),
+            dataset!,
           ]);
+        }
       }
-      return true;
+      return { ok: true, groundTruthSaved, dataset, alreadyMember };
     } catch (e) {
-      notifyError(e);
-      return false;
+      const reason = e instanceof Error ? e.message : "Please try again.";
+      const error = groundTruthSaved
+        ? `Ground truth was saved, but the dataset operation could not be confirmed. ${reason}`
+        : `Ground truth could not be saved. ${reason}`;
+      setMessage(error);
+      return { ok: false, groundTruthSaved, dataset, alreadyMember, error };
     } finally {
       setBusy(false);
     }

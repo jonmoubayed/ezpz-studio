@@ -185,9 +185,11 @@ const expected = {
 };
 await act(async () => {
   assert.equal(
-    await store!.saveExpectedValues(store!.selected!, expected, {
-      name: "Expected values benchmark",
-    }),
+    (
+      await store!.saveExpectedValues(store!.selected!, expected, {
+        name: "Expected values benchmark",
+      })
+    ).ok,
     true,
   );
 });
@@ -197,9 +199,11 @@ const savedDataset = store!.datasets.find(
 assert.equal(savedDataset.count, 1);
 await act(async () => {
   assert.equal(
-    await store!.saveExpectedValues(store!.selected!, expected, {
-      id: savedDataset.id,
-    }),
+    (
+      await store!.saveExpectedValues(store!.selected!, expected, {
+        id: savedDataset.id,
+      })
+    ).ok,
     true,
   );
 });
@@ -235,6 +239,103 @@ assert.equal(
 );
 console.log(
   "PASS: expected values saved with dataset membership, duplicate protection, manifest round trip, preview comparisons, and unchanged historical evaluations.",
+);
+// Re-adding a member preserves its evaluation split/tags and reports an update.
+await api.request(`/datasets/${savedDataset.id}/documents`, {
+  method: "PATCH",
+  body: JSON.stringify({
+    document_id: documentId,
+    split: "test",
+    tags: ["regression"],
+  }),
+});
+await act(async () => {
+  const result = await store!.saveExpectedValues(store!.selected!, expected, {
+    id: savedDataset.id,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.alreadyMember, true);
+  assert.equal(result.dataset?.count, 1);
+});
+const preserved = (await api.request(`/datasets/${savedDataset.id}`))
+  .documents[0];
+assert.equal(preserved.split, "test");
+assert.deepEqual(preserved.tags, ["regression"]);
+// Exercise a real created dataset followed by a failed membership write.
+const realFetch = globalThis.fetch;
+globalThis.fetch = ((input: any, init: any) => {
+  if (
+    typeof input === "string" &&
+    /\/datasets\/[^/]+\/documents$/.test(input) &&
+    init?.method === "POST"
+  )
+    return Promise.resolve(
+      new Response(JSON.stringify({ error: "Simulated membership failure" }), {
+        status: 503,
+      }),
+    );
+  return realFetch(input, init);
+}) as typeof fetch;
+let partial: Awaited<ReturnType<typeof store.saveExpectedValues>>;
+try {
+  await act(async () => {
+    partial = await store!.saveExpectedValues(store!.selected!, expected, {
+      name: "Retry benchmark",
+    });
+  });
+} finally {
+  globalThis.fetch = realFetch;
+}
+assert.equal(partial!.ok, false);
+assert.equal(partial!.groundTruthSaved, true);
+assert.ok(partial!.dataset?.id);
+assert.match(partial!.error!, /Ground truth was saved/);
+assert.match(partial!.error!, /Simulated membership failure/);
+await act(async () => {
+  const result = await store!.saveExpectedValues(store!.selected!, expected, {
+    id: partial!.dataset!.id,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.dataset?.count, 1);
+});
+const retryDatasets = (await api.request("/datasets")).datasets.filter(
+  (d: any) => d.name === "Retry benchmark",
+);
+assert.equal(
+  retryDatasets.length,
+  1,
+  "Retry must reuse the already created dataset",
+);
+const retried = (
+  await api.request(`/datasets/${partial!.dataset!.id}/manifest`)
+).manifest;
+assert.deepEqual(retried.documents[0].ground_truth, expected);
+// A success response without the requested membership is never reported as success.
+globalThis.fetch = ((input: any, init: any) => {
+  if (
+    typeof input === "string" &&
+    input.endsWith(`/datasets/${savedDataset.id}/manifest`)
+  )
+    return Promise.resolve(
+      new Response(JSON.stringify({ manifest: { documents: [] } }), {
+        status: 200,
+      }),
+    );
+  return realFetch(input, init);
+}) as typeof fetch;
+try {
+  await act(async () => {
+    const result = await store!.saveExpectedValues(store!.selected!, expected, {
+      id: savedDataset.id,
+    });
+    assert.equal(result.ok, false);
+    assert.match(result.error!, /Could not verify/);
+  });
+} finally {
+  globalThis.fetch = realFetch;
+}
+console.log(
+  "PASS: dataset writes verified against persisted ground truth, existing split/tags preserved, partial failure exposed, and retry creates no duplicate dataset.",
 );
 await act(async () => {
   root.unmount();

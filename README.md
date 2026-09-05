@@ -137,3 +137,5 @@ Badges distinguish **Model**, **Rule-based**, and **Sample** scores. Model confi
 The backend changes and regression tests are captured in `patches/backend-llm-confidence.patch`. Apply this patch to another backend checkout before using the new confidence badges. Tests mock provider HTTP responses and verify the request contract, nested values, zero and missing confidence, persisted provenance, cache behavior, and unchanged local extraction flows without spending hosted model credits.
 
 Structured response schemas follow [OpenAI’s strict schema requirements](https://developers.openai.com/api/docs/guides/structured-outputs) and [Gemini’s JSON Schema response format](https://ai.google.dev/api/generate-content#generationconfig).
+
+The Expected tab’s dataset action confirms membership and ground truth through the exported manifest before reporting success. Its inline status names the document and destination and includes the updated dataset count. Existing members keep their split and tags; retries retain a newly created dataset ID if membership creation fails. Validation and save failures appear beside the action instead of below the full editor.

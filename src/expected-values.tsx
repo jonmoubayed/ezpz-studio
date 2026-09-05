@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, Database, Plus } from "lucide-react";
 import { FieldSelect } from "./components/field-select";
 import { Button, Busy } from "./ui";
@@ -45,21 +45,30 @@ export function ExpectedValuesEditor({
   onSaved,
 }: {
   document: Document;
-  onSaved?: () => void;
+  onSaved?: (message: string) => void;
 }) {
   const s = useStudio();
   const [raw, setRaw] = useState(() =>
     JSON.stringify(expectedValues(document), null, 2),
   );
   const [loading, setLoading] = useState(s.mode === "live");
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
+  const [loadError, setLoadError] = useState("");
   const [attempt, setAttempt] = useState(0);
   const [datasetId, setDatasetId] = useState("");
   const [name, setName] = useState("");
+  const [pending, setPending] = useState<"truth" | "dataset" | null>(null);
+  const [status, setStatus] = useState<{
+    scope: "truth" | "dataset";
+    message: string;
+    error?: boolean;
+  } | null>(null);
+  const statusRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    setNotice("");
-    setError("");
+    statusRef.current?.scrollIntoView({ block: "nearest" });
+  }, [status]);
+  useEffect(() => {
+    setStatus(null);
+    setLoadError("");
     if (s.mode !== "live") {
       setRaw(JSON.stringify(expectedValues(document), null, 2));
       setLoading(false);
@@ -78,55 +87,99 @@ export function ExpectedValuesEditor({
         s.updateExpectedValues(document.id, values);
       })
       .catch((e) => {
-        if (!abort.signal.aborted) setError(e.message);
+        if (!abort.signal.aborted) setLoadError(e.message);
       })
       .finally(() => {
         if (!abort.signal.aborted) setLoading(false);
       });
     return () => abort.abort();
   }, [document.id, s.mode, attempt]);
-  const disabled = loading || s.busy;
-  async function save(addToDataset = false) {
-    setError("");
-    setNotice("");
+  const disabled = loading || !!loadError || s.busy || !!pending;
+  async function save(scope: "truth" | "dataset") {
+    if (disabled) return;
+    setStatus(null);
     try {
-      const value = JSON.parse(raw) as Record<string, JsonValue>;
+      let value: Record<string, JsonValue>;
+      try {
+        value = JSON.parse(raw);
+      } catch {
+        throw new Error(
+          "Expected values contain invalid JSON. Correct the JSON above and try again.",
+        );
+      }
       if (!value || typeof value !== "object" || Array.isArray(value))
         throw new Error("Expected values must be a JSON object.");
-      if (addToDataset && !Object.keys(value).length)
+      if (scope === "dataset" && !Object.keys(value).length)
         throw new Error(
-          "Add expected values before creating a scored benchmark.",
+          "Add expected values before adding this document to a benchmark.",
         );
-      if (addToDataset && (!datasetId || (datasetId === "new" && !name.trim())))
+      if (
+        scope === "dataset" &&
+        (!datasetId || (datasetId === "new" && !name.trim()))
+      )
         throw new Error("Choose a dataset or enter a name for a new one.");
-      const target = addToDataset
-        ? datasetId === "new"
-          ? { name: name.trim() }
-          : { id: datasetId }
-        : undefined;
-      if (await s.saveExpectedValues(document, value, target)) {
-        setNotice(
-          addToDataset
-            ? "Document and ground truth saved to the dataset."
-            : "Ground truth saved.",
-        );
-        onSaved?.();
-      } else
-        setError(
-          "The operation did not finish. Check the workspace message and try again.",
-        );
+      const target =
+        scope === "dataset"
+          ? datasetId === "new"
+            ? { name: name.trim() }
+            : { id: datasetId }
+          : undefined;
+      setPending(scope);
+      const result = await s.saveExpectedValues(document, value, target);
+      if (result.dataset) {
+        setDatasetId(result.dataset.id);
+        setName("");
+      }
+      if (!result.ok) {
+        setStatus({
+          scope,
+          message: result.error || "Save could not be confirmed. Please retry.",
+          error: true,
+        });
+        return;
+      }
+      const message = result.dataset
+        ? `${result.alreadyMember ? "Updated" : "Added"} ${document.name} with these expected values in “${result.dataset.name}”. ${result.dataset.count} document${result.dataset.count === 1 ? "" : "s"} in this dataset.${result.alreadyMember ? " This document was already a member; no duplicate was added." : ""}`
+        : `Ground truth saved for ${document.name}.`;
+      setStatus({ scope, message });
+      onSaved?.(message);
     } catch (e) {
-      setError((e as Error).message);
+      setStatus({ scope, message: (e as Error).message, error: true });
+    } finally {
+      setPending(null);
     }
+  }
+  function feedback(scope: "truth" | "dataset") {
+    return status?.scope === scope ? (
+      <div
+        ref={statusRef}
+        role={status.error ? "alert" : "status"}
+        className={
+          status.error ? "expected-feedback error" : "expected-feedback success"
+        }
+      >
+        <p>{status.message}</p>
+        {!status.error && scope === "dataset" && (
+          <Button onClick={() => s.navigate("Datasets")}>View datasets</Button>
+        )}
+      </div>
+    ) : null;
   }
   return (
     <div className="expected-values-editor">
       <p>
-        Define the correct values from the source document. These become its
-        ground truth for future evaluations.
+        Define the correct values from {document.name}. These become its ground
+        truth for future evaluations.
       </p>
       {loading ? (
         <Busy label="Loading expected values…" />
+      ) : loadError ? (
+        <div role="alert" className="expected-feedback error">
+          <p>Could not load saved ground truth. {loadError}</p>
+          <Button onClick={() => setAttempt((a) => a + 1)}>
+            Retry loading expected values
+          </Button>
+        </div>
       ) : (
         <>
           <label>
@@ -137,16 +190,16 @@ export function ExpectedValuesEditor({
               className="code-editor"
               rows={10}
               value={raw}
-              disabled={s.busy}
+              disabled={disabled}
               onChange={(e) => {
                 setRaw(e.target.value);
-                setNotice("");
+                setStatus(null);
               }}
             />
           </label>
           <div className="expected-actions">
             <Button
-              disabled={disabled}
+              disabled={disabled || !document.fields.length}
               onClick={() => {
                 setRaw(
                   JSON.stringify(
@@ -157,9 +210,11 @@ export function ExpectedValuesEditor({
                     2,
                   ),
                 );
-                setNotice(
-                  "Check these extracted values against the source before saving.",
-                );
+                setStatus({
+                  scope: "truth",
+                  message:
+                    "Copied extraction values into the editor. Check them against the source, then save.",
+                });
               }}
             >
               Use extraction as starting point
@@ -167,12 +222,19 @@ export function ExpectedValuesEditor({
             <Button
               variant="primary"
               disabled={disabled}
-              onClick={() => save()}
+              onClick={() => save("truth")}
             >
-              <Check size={14} />
-              Save ground truth
+              {pending === "truth" ? (
+                <Busy label="Saving…" />
+              ) : (
+                <>
+                  <Check size={14} />
+                  Save ground truth
+                </>
+              )}
             </Button>
           </div>
+          {feedback("truth")}
           <section className="expected-dataset">
             <h3>
               <Database size={15} />
@@ -184,10 +246,16 @@ export function ExpectedValuesEditor({
                 aria-label="Expected values dataset"
                 value={datasetId}
                 disabled={disabled}
-                onValueChange={setDatasetId}
+                onValueChange={(id) => {
+                  setDatasetId(id);
+                  setStatus(null);
+                }}
                 options={[
                   { value: "", label: "Choose a dataset…", disabled: true },
-                  ...s.datasets.map((d) => ({ value: d.id, label: d.name })),
+                  ...s.datasets.map((d) => ({
+                    value: d.id,
+                    label: `${d.name} · ${d.count} document${d.count === 1 ? "" : "s"}`,
+                  })),
                   { value: "new", label: "Create a new dataset…" },
                 ]}
               />
@@ -198,40 +266,42 @@ export function ExpectedValuesEditor({
                 <input
                   value={name}
                   disabled={disabled}
-                  onChange={(e) => setName(e.target.value)}
+                  onChange={(e) => {
+                    setName(e.target.value);
+                    setStatus(null);
+                  }}
                   placeholder="e.g. Invoice regression cases"
                 />
               </label>
             )}
             <p>
-              Saves this document with the expected values above. Ground truth
-              is shared by datasets containing this document.
+              {!datasetId
+                ? "Choose an existing dataset or create a new one to enable this action."
+                : "Saves the expected values above and adds this document. If it is already in the dataset, only its ground truth is updated."}
             </p>
             <Button
               variant="primary"
               disabled={
                 disabled || !datasetId || (datasetId === "new" && !name.trim())
               }
-              onClick={() => save(true)}
+              onClick={() => save("dataset")}
             >
-              <Plus size={14} />
-              Add document & ground truth
+              {pending === "dataset" ? (
+                <Busy label="Saving document & ground truth…" />
+              ) : (
+                <>
+                  <Plus size={14} />
+                  Add document & ground truth
+                </>
+              )}
             </Button>
+            {feedback("dataset")}
+            <p>
+              Ground truth is shared by datasets containing this document. Saved
+              evaluation runs retain their original results.
+            </p>
           </section>
         </>
-      )}
-      {notice && (
-        <p className="expected-success" role="status">
-          {notice}
-        </p>
-      )}
-      {error && (
-        <div className="form-error" role="alert">
-          <p>{error}</p>
-          <Button disabled={disabled} onClick={() => setAttempt((a) => a + 1)}>
-            Reload saved values
-          </Button>
-        </div>
       )}
     </div>
   );
