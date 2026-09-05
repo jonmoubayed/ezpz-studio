@@ -1,0 +1,32 @@
+name: Static demo checks
+
+on:
+  push:
+    paths:
+      - 'demo-site/**'
+      - '.github/workflows/demo-site.yml'
+  pull_request:
+    paths:
+      - 'demo-site/**'
+      - '.github/workflows/demo-site.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: demo-site
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '11.17.0'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm test:demo

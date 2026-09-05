@@ -1,0 +1,16 @@
+.ezpz/
+.env
+.env.local
+.env.production
+__pycache__/
+*.py[cod]
+.DS_Store
+node_modules/
+dist/
+.pnpm-store/
+
+# Local captures and workspace databases are not project source.
+private/
+.screenshots/
+.schema-audit-*.png
+.impeccable/

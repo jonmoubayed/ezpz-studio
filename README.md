@@ -131,6 +131,10 @@ Missing model credentials and provider failures produce explicit errors. The det
 
 For backups, stop the backend and copy its database and blob directory together. Save any browser-only processor drafts as versions first. Keep credentials out of shared backups and issue attachments.
 
+## Static demo website
+
+The separate [`demo-site/`](demo-site/) project contains the minimal landing page and browser-only studio demo. Build and host its `dist/` directory without a backend or provider credentials. Sample extractions and evaluations are simulated; selected files stay in the browser. See its [setup and hosting instructions](demo-site/README.md).
+
 ## Development
 
 ```bash
