@@ -4664,3 +4664,9 @@ h1 {
     min-width: 0;
   }
 }
+
+.connection-state { padding: 32px; margin: 24px 0; }
+.connection-state p { color: var(--muted-foreground); margin: 12px 0 20px; }
+.review-run-select { margin: 0 0 16px; max-width: 560px; }
+
+.connection-pill.offline i { background: #b77735; }

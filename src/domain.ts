@@ -50,6 +50,7 @@ export type EvalGroup = {
   description?: string;
 };
 export type Run = {
+  processorId?: string;
   groupId?: string;
   groupName?: string;
   experimentId?: string;

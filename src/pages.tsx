@@ -197,12 +197,13 @@ export function Overview() {
   const best = s.runs
     .filter((r) => r.score !== null)
     .sort((a, b) => b.score! - a.score!)[0];
-  const low = s.documents
+  const low = s.reviewDocuments
     .filter((d) => s.mode === "demo" || d.runId)
     .flatMap((d) =>
       d.fields.filter(
         (f) =>
-          f.confidence < 0.9 &&
+          (f.confidence < 0.9 ||
+            (f.status && !["correct", "unscored"].includes(f.status))) &&
           !s.reviews.some(
             (r) =>
               r.documentId === d.id &&
@@ -496,6 +497,7 @@ export function ConfigForm({
   onChange: (c: Config) => void;
   showSchema?: boolean;
 }) {
+  const s = useStudio();
   const patch = (p: Partial<Config>) => onChange({ ...config, ...p });
   return (
     <div className="config-form">
@@ -507,27 +509,37 @@ export function ConfigForm({
             onValueChange={(value) =>
               patch({
                 provider: value,
-                model: (
-                  {
-                    local: "deterministic-local",
-                    openai: "gpt-4.1",
-                    anthropic: "claude-sonnet-4-20250514",
-                    google: "gemini-2.5-flash",
-                    ollama: "qwen3:8b",
-                    "openai-compatible": "custom-model",
-                  } as Record<string, string>
-                )[value],
+                baseUrl:
+                  s.adapters?.llm.find((p) => p.id === value)
+                    ?.default_endpoint || config.baseUrl,
+                model:
+                  s.adapters?.llm.find((p) => p.id === value)?.models[0] ||
+                  (
+                    {
+                      local: "deterministic-local",
+                      openai: "gpt-4.1",
+                      anthropic: "claude-sonnet-4-20250514",
+                      google: "gemini-2.5-flash",
+                      ollama: "qwen3:8b",
+                      "openai-compatible": "custom-model",
+                    } as Record<string, string>
+                  )[value] ||
+                  "",
               })
             }
             aria-label="Model provider"
-            options={[
-              ["local", "Local · deterministic"],
-              ["openai", "OpenAI"],
-              ["anthropic", "Anthropic"],
-              ["google", "Google Gemini"],
-              ["ollama", "Ollama"],
-              ["openai-compatible", "OpenAI-compatible endpoint"],
-            ].map(([value, label]) => ({ value, label }))}
+            options={
+              s.mode === "live" && s.adapters
+                ? s.adapters.llm.map((p) => ({ value: p.id, label: p.label }))
+                : [
+                    ["local", "Local · deterministic"],
+                    ["openai", "OpenAI"],
+                    ["anthropic", "Anthropic"],
+                    ["google", "Google Gemini"],
+                    ["ollama", "Ollama"],
+                    ["openai-compatible", "OpenAI-compatible endpoint"],
+                  ].map(([value, label]) => ({ value, label }))
+            }
           />
         </label>
         <label>
@@ -555,11 +567,15 @@ export function ConfigForm({
           value={config.parser}
           onValueChange={(value) => patch({ parser: value })}
           aria-label="Document parser"
-          options={[
-            { value: "native", label: "Native text · local" },
-            { value: "docling", label: "Docling · local" },
-            { value: "llama-parse", label: "LlamaParse" },
-          ]}
+          options={
+            s.mode === "live" && s.adapters
+              ? s.adapters.parsers.map((p) => ({ value: p.id, label: p.label }))
+              : [
+                  { value: "native", label: "Native text · local" },
+                  { value: "docling", label: "Docling · local" },
+                  { value: "llama-parse", label: "LlamaParse" },
+                ]
+          }
         />
       </label>
       <label>
@@ -746,8 +762,10 @@ export function RunModal({
 export function HillClimbing() {
   const s = useStudio();
   const [candidate, setCandidate] = useState("Be explicit about currency");
-  const [config, setConfig] = useState(s.config);
-  const [dataset, setDataset] = useState(s.datasets[0]?.id || "");
+  const [config, setConfig] = useState(s.runs[0]?.config || s.config);
+  const [dataset, setDataset] = useState(
+    s.runs[0]?.datasetId || s.datasets[0]?.id || "",
+  );
   const [baseline, setBaseline] = useState(s.runs[0]?.id || "");
   const [error, setError] = useState("");
   const choices = [
@@ -797,6 +815,10 @@ export function HillClimbing() {
                   onValueChange={(value) => {
                     setDataset(value);
                     setBaseline("");
+                    setConfig(
+                      s.runs.find((r) => r.datasetId === value)?.config ||
+                        s.config,
+                    );
                   }}
                   aria-label="Dataset"
                   options={s.datasets.map((d) => ({
@@ -809,7 +831,12 @@ export function HillClimbing() {
                 Baseline run
                 <FieldSelect
                   value={base?.id || ""}
-                  onValueChange={(value) => setBaseline(value)}
+                  onValueChange={(value) => {
+                    setBaseline(value);
+                    setConfig(
+                      s.runs.find((r) => r.id === value)?.config || s.config,
+                    );
+                  }}
                   aria-label="Baseline run"
                   options={benchmarkRuns.map((r) => ({
                     value: r.id,
@@ -906,7 +933,12 @@ export function HillClimbing() {
                   setError((e as Error).message);
                   return;
                 }
-                if (await s.benchmark(candidate, dataset, config))
+                if (
+                  await s.benchmark(candidate, dataset, config, {
+                    id: base?.groupId,
+                    processorId: base?.processorId,
+                  })
+                )
                   s.navigate("Evaluations");
               }}
             >
@@ -965,6 +997,7 @@ export function Datasets() {
   }
   async function open(d: Dataset) {
     setDetail(d);
+    setMembers([]);
     if (s.mode === "live") {
       try {
         const data = await api.request(`/datasets/${d.id}`);
@@ -1189,12 +1222,18 @@ export function Datasets() {
             ))}
         </div>
         <Button
-          onClick={() =>
-            downloadJson("dataset-manifest.json", {
-              dataset: detail,
-              document_ids: members,
-            })
-          }
+          onClick={async () => {
+            try {
+              const manifest =
+                s.mode === "live"
+                  ? (await api.request(`/datasets/${detail!.id}/manifest`))
+                      .manifest
+                  : { dataset: detail, document_ids: members };
+              downloadJson("dataset-manifest.json", manifest);
+            } catch (e) {
+              s.notifyError(e);
+            }
+          }}
         >
           <Download size={14} />
           Export manifest

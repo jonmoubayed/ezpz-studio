@@ -8,10 +8,12 @@ Requires Node.js 20.19+ or 22.12+.
 
 ```sh
 npm ci
-npm run dev
+npm start
 ```
 
-Open **http://127.0.0.1:5180**. The app starts in an explicitly labeled demo workspace. No credentials or backend are required to explore the design.
+Open **http://127.0.0.1:5180**. Studio connects to the local backend automatically and restores your selected processor, working configuration, source, and review run. `npm start` starts the backend from `../ezpz-studio` when needed, then launches Vite. An already-running backend is reused and left running when Studio stops. Install the backend Python requirements first (see below).
+
+To run only the frontend, use `npm run dev`. To explore illustrative fixtures without a backend, open **http://127.0.0.1:5180/?demo=1** or choose **Explore demo** on the offline screen.
 
 ```sh
 npm run build
@@ -25,11 +27,14 @@ The preview also serves on port 5180; stop the dev server before using it.
 In the original `ezpz-studio` repository, install its Python requirements and run:
 
 ```sh
-pip install -r requirements.txt
-python3 server.py
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/python -m backend.server --root . --host 127.0.0.1 --port 4173
 ```
 
-In this frontend, open **Settings → Connect local API**. Requests to `/v1` are proxied to `http://127.0.0.1:4173`. To change that address, copy `.env.example` to `.env`, edit `EZPZ_API_URL`, and restart the frontend server. Provider credentials remain in the backend configuration; never place them in frontend environment variables.
+Studio connects automatically. **Settings → Refresh connection** reloads workspace data; an unavailable API shows an explicit reconnect screen. Requests to `/v1` are proxied to `http://127.0.0.1:4173`. To change that address, copy `.env.example` to `.env`, edit `EZPZ_API_URL`, and restart the frontend server. Provider credentials remain in the backend configuration; never place them in frontend environment variables.
+
+`npm start` uses the backend’s `.venv/bin/python` if present, otherwise `python3`. Set `EZPZ_PYTHON` to a different virtualenv interpreter, `EZPZ_BACKEND_REPO` to another backend checkout, or `EZPZ_STUDIO_PORT` to change the frontend port. These settings can live in this repo’s ignored `.env`. The backend currently needs Python 3.9–3.12 because its upload handler uses `cgi`.
 
 The frontend does not require an Extend account, Extend API, or Extend extraction model. Extend supplies the open-source document UI only. Fonts and the PDF engine WASM are served locally; the install script copies the pinned WASM package into `public/vendor/`.
 
@@ -52,9 +57,9 @@ The UI adapts to mobile with a collapsible navigation panel, stacked document/re
 - Demo documents and historical scores are illustrative fixtures, not measured model benchmarks.
 - Running a demo experiment adds an explicitly labeled fixture result with a fixed score. It does not call a model or imply the hypothesis improved accuracy.
 - Demo configuration, runs, and feedback persist in browser storage. Demo uploads, ground-truth edits, and new datasets last for the current session. **Settings → Reset demo** restores the initial fixtures.
-- Each page reload starts in demo mode. Reconnect in Settings to inspect the local API again.
+- Normal URLs start in live mode. Demo mode is explicit in the URL (`?demo=1`), and demo configuration is stored separately from live processor working copies. Switching back to live restores your backend workspace. An unavailable backend never silently falls back to fixtures.
 - Live uploads, annotations, runs, and review decisions persist in the original backend database. Existing frontend and backend source files remain separate.
-- Extraction previews have no reviewable immutable run. Open a scored run in Evaluations and choose **Inspect results** to review its snapshot and saved decisions.
+- Extraction previews have no reviewable immutable run. Open a scored run in Evaluations and choose **Review fields**, or select a saved run directly in **Review queue**. Feedback is loaded from the backend and remains scoped to that run, document, and field.
 - Live provider warnings are displayed. The backend can fall back to compatibility parsing or its invoice-specific deterministic model when optional dependencies or credentials are absent. Install its requirements for PDF text parsing, and use a configured model for general extraction.
 - Hill climbing is a manual experiment loop in this version, not an autonomous optimization scheduler. Compare runs from the same dataset. A repeated dataset ID does not itself guarantee unchanged membership or ground truth; retain a fixed benchmark while comparing.
 - PDF, image, and text/CSV preview are included. DOCX/XLSX-specific viewers are not installed in this experiment.
@@ -69,11 +74,17 @@ Installed directly from the official [Extend UI registry](https://www.extend.ai/
 
 Registry icon placeholders were resolved to Lucide icons. The shared PDF engine was changed from a CDN URL to a locally served WASM asset. Unused registry editor dependencies were removed. The shell, screens, state, charts, API adapter, and styling were authored fresh for this redesign. Upstream licensing is preserved in [EXTEND-LICENSE.md](EXTEND-LICENSE.md). Font and PDF engine licenses are included in `licenses/`.
 
+## Backend compatibility fix
+
+The connected browser test found that `/v1/datasets/:id/manifest` returned null ground truth even for annotated documents. The local backend now reads each document’s latest annotation when exporting. The fix and its Python regression test are also captured in `patches/backend-manifest-ground-truth.patch` for applying once to another backend checkout.
+
 ## Verification
 
 ```sh
 npm test
 npm run test:integration
+npx playwright install chromium
+npm run test:e2e
 npm run build
 ```
 
@@ -81,7 +92,7 @@ Unit checks protect structured JSON values, nulls, unknown ground truth, zero-va
 
 The integration runner expects the original backend in `../ezpz-studio`. Override `EZPZ_BACKEND_REPO` or `EZPZ_TEST_PYTHON` if needed. It never uses the original database or `.env` file.
 
-Browser verification covers PDF rendering and field overlays, saved corrections, local API connection/extraction, run comparisons, and narrow-screen layout/navigation.
+The React integration test mounts the real store in StrictMode and checks live startup, processor/draft restoration, extraction, saved review data, reloads, and demo isolation. The headless Chromium test builds the app, starts a disposable backend and Vite proxy, then exercises processor/schema editing, side-by-side extraction, annotations, datasets, grouped evaluations, reviewer corrections, iteration comparison, PDF viewing, and offline recovery. Screenshots are saved under ignored `test-results/`. Tests use the local deterministic adapter; hosted model providers are not called.
 
 ## Source layout
 

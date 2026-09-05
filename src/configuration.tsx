@@ -457,7 +457,8 @@ export function Configuration() {
               value={source?.id || ""}
               disabled={running}
               onValueChange={(value) => {
-                s.setSelectedId(value);
+                const selected = s.documents.find((d) => d.id === value);
+                if (selected) s.selectDocument(selected);
                 setActiveField("");
                 setPreviewError("");
               }}

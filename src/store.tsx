@@ -1,4 +1,11 @@
-import { createContext, useContext, useState, type ReactNode } from "react";
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useRef,
+  type ReactNode,
+} from "react";
 import {
   defaultConfig,
   readStored,
@@ -17,6 +24,10 @@ import {
   type Run,
 } from "./domain";
 import * as api from "./api";
+import {
+  evaluationDocuments,
+  demoEvaluationDocuments,
+} from "./evaluation-model";
 type Review = {
   documentId: string;
   field: string;
@@ -27,7 +38,21 @@ type Review = {
   at: string;
 };
 function useStore() {
-  const [mode, setMode] = useState<"demo" | "live">("demo");
+  const initialDemo = new URLSearchParams(location.search).get("demo") === "1";
+  const [mode, setMode] = useState<"demo" | "live">(
+    initialDemo ? "demo" : "live",
+  );
+  const [connection, setConnection] = useState<
+    "connecting" | "ready" | "offline"
+  >(initialDemo ? "ready" : "connecting");
+  const [adapters, setAdapters] = useState<api.AdapterCatalog | null>(null);
+  const [reviewDocuments, setReviewDocuments] = useState<Document[]>([]);
+  const [reviewRunId, setReviewRunId] = useState("");
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const connectionAttempt = useRef(0);
+  const reviewAttempt = useRef(0);
+  const documentRequest = useRef(0);
+
   const [page, setPageState] = useState<Page>(() => {
     try {
       const page = decodeURIComponent(location.hash.slice(1)) as Page;
@@ -48,32 +73,41 @@ function useStore() {
       return "Overview";
     }
   });
-  const [documents, setDocuments] = useState<Document[]>(sampleDocuments);
-  const [datasets, setDatasets] = useState<Dataset[]>(sampleDatasets);
+  const [documents, setDocuments] = useState<Document[]>(
+    initialDemo ? sampleDocuments : [],
+  );
+  const [datasets, setDatasets] = useState<Dataset[]>(
+    initialDemo ? sampleDatasets : [],
+  );
   const [runs, setRuns] = useState<Run[]>(
-    readStored<Run[]>("ezpz-redesign-runs", sampleRuns).map((r) => ({
+    (initialDemo
+      ? readStored<Run[]>("ezpz-redesign-runs", sampleRuns)
+      : []
+    ).map((r) => ({
       ...sampleRuns.find((sample) => sample.id === r.id),
       ...r,
     })),
   );
   const [evalGroups, setEvalGroups] = useState<EvalGroup[]>(
-    readStored("ezpz-redesign-groups", sampleGroups),
+    initialDemo ? readStored("ezpz-redesign-groups", sampleGroups) : [],
   );
   const [selectedId, setSelectedId] = useState("sample-0");
   const [config, setConfig] = useState<Config>(
-    readStored("ezpz-redesign-config", defaultConfig),
+    initialDemo
+      ? readStored("ezpz-redesign-config", defaultConfig)
+      : defaultConfig,
   );
   const [reviews, setReviews] = useState<Review[]>(
-    readStored("ezpz-redesign-reviews", []),
+    initialDemo ? readStored("ezpz-redesign-reviews", []) : [],
   );
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [processors, setProcessors] = useState<Processor[]>(
-    readStored("ezpz-redesign-processors", sampleProcessors),
+    initialDemo ? readStored("ezpz-redesign-processors", sampleProcessors) : [],
   );
   const [activeProcessorId, setActiveProcessorId] = useState<string>(
-    readStored("ezpz-redesign-active-processor", ""),
+    initialDemo ? readStored("ezpz-redesign-active-processor", "") : "",
   );
   const [configRevision, setConfigRevision] = useState(0);
   const [newProcessorDraft, setNewProcessorDraft] = useState<Config | null>(
@@ -82,12 +116,17 @@ function useStore() {
   const activeProcessor = processors.find((p) => p.id === activeProcessorId);
   function chooseProcessor(p: Processor, config = p.config) {
     setActiveProcessorId(p.id);
-    if (mode === "demo")
-      localStorage.setItem(
-        "ezpz-redesign-active-processor",
-        JSON.stringify(p.id),
-      );
-    updateConfig(structuredClone(config));
+    localStorage.setItem(
+      mode === "demo"
+        ? "ezpz-redesign-active-processor"
+        : "ezpz-live-active-processor",
+      JSON.stringify(p.id),
+    );
+    setConfig(structuredClone(config));
+    localStorage.setItem(
+      mode === "demo" ? "ezpz-redesign-config" : `ezpz-live-config:${p.id}`,
+      JSON.stringify(config),
+    );
     setConfigRevision((v) => v + 1);
   }
   function persistProcessors(next: Processor[]) {
@@ -200,20 +239,40 @@ function useStore() {
   }
   function updateConfig(c: Config) {
     setConfig(c);
-    localStorage.setItem("ezpz-redesign-config", JSON.stringify(c));
+    localStorage.setItem(
+      mode === "demo"
+        ? "ezpz-redesign-config"
+        : `ezpz-live-config:${activeProcessorId || "scratch"}`,
+      JSON.stringify(c),
+    );
   }
   function updateDocument(d: Document) {
     setDocuments((ds) => ds.map((x) => (x.id === d.id ? d : x)));
   }
-  async function selectDocument(d: Document) {
+  function selectDocument(d: Document) {
     setSelectedId(d.id);
     if (mode === "live")
-      try {
-        updateDocument(await api.inspectDocument(d));
-      } catch (e) {
-        notifyError(e);
-      }
+      localStorage.setItem("ezpz-live-document", JSON.stringify(d.id));
   }
+  useEffect(() => {
+    if (mode !== "live" || connection !== "ready" || !selectedId) return;
+    const abort = new AbortController();
+    const attempt = ++documentRequest.current;
+    const doc = documents.find((d) => d.id === selectedId);
+    if (doc) {
+      updateDocument({ ...doc, fields: [], runId: undefined, warnings: [] });
+      api
+        .inspectDocument(doc, activeProcessorId, abort.signal)
+        .then((result) => {
+          if (!abort.signal.aborted && attempt === documentRequest.current)
+            updateDocument(result);
+        })
+        .catch((e) => {
+          if (!abort.signal.aborted) notifyError(e);
+        });
+    }
+    return () => abort.abort();
+  }, [selectedId, activeProcessorId, mode, connection]);
   function notifyError(e: unknown) {
     setMessage(
       e instanceof Error
@@ -221,29 +280,120 @@ function useStore() {
         : "Something went wrong. Please try again.",
     );
   }
-  async function connect() {
-    setBusy(true);
+  async function loadReviewRun(
+    id: string,
+    workspace = documents,
+    live = mode === "live",
+  ) {
+    const attempt = ++reviewAttempt.current;
+    setReviewLoading(true);
+    setReviewDocuments([]);
+    setReviews([]);
+    setReviewRunId(id);
     try {
+      if (live) {
+        const { run } = await api.request(`/runs/${encodeURIComponent(id)}`);
+        if (attempt !== reviewAttempt.current) return false;
+        setReviewDocuments(evaluationDocuments(run, workspace));
+        setReviews(
+          (run.review_decisions || []).map((r: any) => ({
+            documentId: r.document_id,
+            field: r.field_path,
+            status: r.status,
+            value: r.corrected_value,
+            note: r.note || "",
+            runId: id,
+            at: r.updated_at,
+          })),
+        );
+        localStorage.setItem("ezpz-live-review-run", JSON.stringify(id));
+      } else {
+        const run = runs.find((r) => r.id === id);
+        if (run) setReviewDocuments(demoEvaluationDocuments(run));
+        setReviews(readStored("ezpz-redesign-reviews", []));
+      }
+      return true;
+    } catch (e) {
+      if (attempt === reviewAttempt.current) notifyError(e);
+      return false;
+    } finally {
+      if (attempt === reviewAttempt.current) setReviewLoading(false);
+    }
+  }
+  async function connect() {
+    const attempt = ++connectionAttempt.current;
+    setBusy(true);
+    setMode("live");
+    setConnection("connecting");
+    setMessage("");
+    ++reviewAttempt.current;
+    setReviewRunId("");
+    setReviewDocuments([]);
+    setReviews([]);
+    try {
+      await api.request("/ready", { signal: AbortSignal.timeout(5000) });
       const data = await api.loadWorkspace();
+      if (attempt !== connectionAttempt.current) return;
       setDocuments(data.documents);
       setDatasets(data.datasets);
       setRuns(data.runs);
       setProcessors(data.processors);
       setEvalGroups(data.evalGroups);
-      setSelectedId(data.documents[0]?.id || "");
-      setActiveProcessorId("");
-      setMode("live");
-      setReviews([]);
-      setMessage(
-        "Connected to your local ezpz API. You are viewing real workspace data.",
+      setAdapters(data.adapters);
+      const savedDocument = readStored("ezpz-live-document", "");
+      setSelectedId(
+        data.documents.find((d) => d.id === savedDocument)?.id ||
+          data.documents[0]?.id ||
+          "",
       );
+      const savedProcessor = readStored("ezpz-live-active-processor", "");
+      const processor =
+        data.processors.find((p) => p.id === savedProcessor) ||
+        data.processors[0];
+      setActiveProcessorId(processor?.id || "");
+      setConfig(
+        readStored(
+          `ezpz-live-config:${processor?.id || "scratch"}`,
+          processor?.config || defaultConfig,
+        ),
+      );
+      setConfigRevision((v) => v + 1);
+      setConnection("ready");
+      const url = new URL(location.href);
+      url.searchParams.delete("demo");
+      history.replaceState(null, "", url);
+      const savedReview = readStored("ezpz-live-review-run", "");
+      const run = data.runs.find((r) => r.id === savedReview) || data.runs[0];
+      if (run) await loadReviewRun(run.id, data.documents, true);
     } catch (e) {
-      notifyError(e);
+      if (attempt === connectionAttempt.current) {
+        setConnection("offline");
+        notifyError(e);
+      }
     } finally {
-      setBusy(false);
+      if (attempt === connectionAttempt.current) setBusy(false);
     }
   }
+  useEffect(() => {
+    if (!initialDemo) void connect();
+    return () => {
+      ++connectionAttempt.current;
+      ++reviewAttempt.current;
+    };
+  }, []);
   function demo() {
+    ++connectionAttempt.current;
+    ++reviewAttempt.current;
+    setReviewLoading(false);
+    setBusy(false);
+    setConnection("ready");
+    setReviewRunId("");
+    setReviewDocuments([]);
+    setConfig(readStored("ezpz-redesign-config", defaultConfig));
+    setConfigRevision((v) => v + 1);
+    const url = new URL(location.href);
+    url.searchParams.set("demo", "1");
+    history.replaceState(null, "", url);
     setMode("demo");
     setProcessors(readStored("ezpz-redesign-processors", sampleProcessors));
     setActiveProcessorId(readStored("ezpz-redesign-active-processor", ""));
@@ -268,14 +418,22 @@ function useStore() {
     localStorage.removeItem("ezpz-redesign-active-processor");
     localStorage.removeItem("ezpz-redesign-runs");
     localStorage.removeItem("ezpz-redesign-reviews");
-    updateConfig(defaultConfig);
+    localStorage.removeItem("ezpz-redesign-config");
     demo();
     setMessage("Demo reset to the original sample documents and experiments.");
   }
   async function refresh() {
     if (mode === "live") {
       const data = await api.loadWorkspace();
+      setDocuments((current) =>
+        data.documents.map((d) => ({
+          ...current.find((old) => old.id === d.id),
+          ...d,
+          fields: current.find((old) => old.id === d.id)?.fields || [],
+        })),
+      );
       setRuns(data.runs);
+      setAdapters(data.adapters);
       setDatasets(data.datasets);
       setProcessors(data.processors);
       setEvalGroups(data.evalGroups);
@@ -303,7 +461,7 @@ function useStore() {
         );
       }
       setDocuments((d) => [...added, ...d]);
-      if (added[0]) setSelectedId(added[0].id);
+      if (added[0]) selectDocument(added[0]);
       setUploadOpen(false);
       navigate(page === "Configuration" ? "Configuration" : "Playground");
       setMessage(
@@ -319,6 +477,7 @@ function useStore() {
   }
   async function extract() {
     if (!selected) return null;
+    ++documentRequest.current;
     setBusy(true);
     try {
       if (mode === "demo") {
@@ -347,7 +506,7 @@ function useStore() {
         const result = await api.previewDocument(
           selected,
           config,
-          processor.name,
+          processor.id,
         );
         const extraction = result.extraction || result;
         const extracted: Document = {
@@ -485,6 +644,13 @@ function useStore() {
   }
   return {
     mode,
+    connection,
+    adapters,
+    reviewDocuments:
+      mode === "demo" && !reviewRunId ? documents : reviewDocuments,
+    reviewRunId,
+    reviewLoading,
+    loadReviewRun,
     page,
     navigate,
     documents,

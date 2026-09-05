@@ -54,6 +54,7 @@ export function normalizeRun(r: any): Run {
     groupId:
       r.eval_group?.id || r.eval_experiment?.eval_group?.id || r.eval_group_id,
     groupName: r.eval_group?.name || r.eval_experiment?.eval_group?.name,
+    processorId: r.processor_version?.processor_id,
     experimentId: r.eval_experiment_id || r.eval_experiment?.id,
     config: r.processor_version
       ? {
@@ -122,15 +123,27 @@ export function extractionFields(e: any, groundTruth?: any): Field[] {
     },
   );
 }
-export async function loadWorkspace() {
-  const [d, s, r, p, g] = await Promise.all([
-    request("/documents"),
-    request("/datasets"),
-    request("/runs"),
-    request("/processors"),
-    request("/eval-groups"),
+export type AdapterCatalog = {
+  llm: {
+    id: string;
+    label: string;
+    models: string[];
+    default_endpoint?: string;
+    kind: string;
+  }[];
+  parsers: { id: string; label: string }[];
+};
+export async function loadWorkspace(signal = AbortSignal.timeout(15000)) {
+  const [d, s, r, p, g, a] = await Promise.all([
+    request("/documents", { signal }),
+    request("/datasets", { signal }),
+    request("/runs", { signal }),
+    request("/processors", { signal }),
+    request("/eval-groups", { signal }),
+    request("/adapters", { signal }),
   ]);
   return {
+    adapters: (a.adapters || a) as AdapterCatalog,
     documents: d.documents.map(normalizeDocument) as Document[],
     datasets: s.datasets.map((x: any) => ({
       id: x.id,
@@ -139,7 +152,9 @@ export async function loadWorkspace() {
       count: x.document_count ?? 0,
     })) as Dataset[],
     runs: r.runs.map(normalizeRun) as Run[],
-    processors: p.processors.map(normalizeProcessor),
+    processors: p.processors.map(
+      normalizeProcessor,
+    ) as import("./domain").Processor[],
     evalGroups: g.eval_groups.map((g: any) => ({
       id: g.id,
       name: g.name,
@@ -155,8 +170,15 @@ export async function uploadDocument(file: File) {
     (await request("/documents", { method: "POST", body: form })).document,
   );
 }
-export async function inspectDocument(d: Document) {
-  const data = await request(`/documents/${d.id}`);
+export async function inspectDocument(
+  d: Document,
+  processorId?: string,
+  signal?: AbortSignal,
+) {
+  const data = await request(
+    `/documents/${d.id}${processorId ? `?processor=${encodeURIComponent(processorId)}` : ""}`,
+    { signal },
+  );
   return {
     ...d,
     fields: extractionFields(data.extraction, data.ground_truth),
@@ -169,9 +191,15 @@ export async function previewDocument(
   c: Config,
   processor: string,
 ) {
+  const saved = (await request(`/processors/${encodeURIComponent(processor)}`))
+    .processor;
+  const latest = [...saved.versions].sort((a, b) => b.version - a.version)[0];
   return request(`/processors/${encodeURIComponent(processor)}/draft/preview`, {
     method: "POST",
-    body: JSON.stringify({ document_id: d.id, config: configPayload(c) }),
+    body: JSON.stringify({
+      document_id: d.id,
+      config: mergeEditableConfig(latest, c),
+    }),
   });
 }
 export async function newProcessor(name: string, c: Config, description = "") {
@@ -303,29 +331,36 @@ export async function saveProcessorVersion(
       method: "PATCH",
       body: JSON.stringify(details),
     });
-  const { harness, ...editable } = configPayload(config);
-  // Preserve harness, normalization, and provider-specific options that are not exposed in this editor.
   const { draft } = await request(
     `/processors/${encodeURIComponent(id)}/draft`,
   );
-  const merged = {
-    ...editable,
-    parser: {
-      ...(draft.parser?.name === config.parser ? draft.parser : {}),
-      ...editable.parser,
-    },
-    model: {
-      ...(draft.model?.provider === config.provider ? draft.model : {}),
-      ...editable.model,
-    },
-    prompt: { ...draft.prompt, ...editable.prompt },
-  };
-  if (!["ollama", "openai-compatible"].includes(config.provider))
-    delete merged.model.base_url;
+  const merged = mergeEditableConfig(draft, config);
   await request(`/processors/${encodeURIComponent(id)}/draft`, {
     method: "PATCH",
     body: JSON.stringify({ config: merged }),
   });
   return (await post(`/processors/${encodeURIComponent(id)}/draft/publish`, {}))
     .version;
+}
+
+// Merge the controls exposed in Studio without discarding backend-only options.
+export function mergeEditableConfig(base: any, config: Config) {
+  const editable = configPayload(config);
+  const merged = {
+    ...editable,
+    harness: base?.harness || editable.harness,
+    ...(base?.normalization ? { normalization: base.normalization } : {}),
+    parser: {
+      ...(base?.parser?.name === config.parser ? base.parser : {}),
+      ...editable.parser,
+    },
+    model: {
+      ...(base?.model?.provider === config.provider ? base.model : {}),
+      ...editable.model,
+    },
+    prompt: { ...base?.prompt, ...editable.prompt },
+  };
+  if (!["ollama", "openai-compatible"].includes(config.provider))
+    delete merged.model.base_url;
+  return merged;
 }

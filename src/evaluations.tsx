@@ -549,17 +549,27 @@ function EvaluationResults({ run, onBack }: { run: Run; onBack: () => void }) {
         title={run.name}
         description={`${run.model} · ${run.config?.parser || "Saved configuration"} · ${run.documents} documents`}
         actions={
-          <Button
-            onClick={() =>
-              downloadJson(
-                `${run.id}-results.json`,
-                snapshot || { run, documents: docs },
-              )
-            }
-          >
-            <Download size={14} />
-            Export results
-          </Button>
+          <>
+            <Button
+              disabled={loading || s.busy}
+              onClick={async () => {
+                if (await s.loadReviewRun(run.id)) s.navigate("Review queue");
+              }}
+            >
+              Review fields
+            </Button>
+            <Button
+              onClick={() =>
+                downloadJson(
+                  `${run.id}-results.json`,
+                  snapshot || { run, documents: docs },
+                )
+              }
+            >
+              <Download size={14} />
+              Export results
+            </Button>
+          </>
         }
       />
       <div className="eval-result-metrics">

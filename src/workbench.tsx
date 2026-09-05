@@ -156,14 +156,13 @@ export function Playground() {
             author: "local",
           }),
         });
-      else
-        s.updateDocument({
-          ...d,
-          fields: d.fields.map((f) => ({
-            ...f,
-            expected: value[f.key] ?? f.expected,
-          })),
-        });
+      s.updateDocument({
+        ...d,
+        fields: d.fields.map((f) => ({
+          ...f,
+          expected: value[f.key] ?? null,
+        })),
+      });
       setGroundTruthOpen(false);
       s.setMessage("Ground truth saved for this document.");
     } catch (e) {
@@ -417,19 +416,22 @@ export function Playground() {
             ) : null}
             <div className="results-footer">
               <Button
-                disabled={!d.fields.length}
-                onClick={() => {
-                  setGroundTruth(
-                    JSON.stringify(
-                      Object.fromEntries(
-                        d.fields.map((f) => [f.key, f.expected]),
-                      ),
-                      null,
-                      2,
-                    ),
-                  );
+                disabled={s.busy}
+                onClick={async () => {
                   setError("");
-                  setGroundTruthOpen(true);
+                  try {
+                    const saved =
+                      s.mode === "live"
+                        ? (await api.request(`/documents/${d.id}/ground-truth`))
+                            .ground_truth?.value || {}
+                        : Object.fromEntries(
+                            d.fields.map((f) => [f.key, f.expected]),
+                          );
+                    setGroundTruth(JSON.stringify(saved, null, 2));
+                    setGroundTruthOpen(true);
+                  } catch (e) {
+                    s.notifyError(e);
+                  }
                 }}
               >
                 <CheckCheck size={14} />
@@ -537,7 +539,7 @@ export function ReviewQueue() {
   const [filter, setFilter] = useState("pending");
   const [value, setValue] = useState("");
   const [note, setNote] = useState("");
-  const items = s.documents
+  const items = s.reviewDocuments
     .filter((d) => s.mode === "demo" || d.runId)
     .flatMap((d) =>
       d.fields
@@ -564,9 +566,13 @@ export function ReviewQueue() {
     .filter((item) => filter === "all" || !item.review);
   const current = items[Math.min(index, Math.max(0, items.length - 1))];
   useEffect(() => {
-    setValue(current ? displayValue(current.f.value) : "");
-    setNote("");
-  }, [current?.d.id, current?.f.key]);
+    setValue(
+      current
+        ? displayValue(current.review ? current.review.value : current.f.value)
+        : "",
+    );
+    setNote(current?.review?.note || "");
+  }, [current?.d.id, current?.d.runId, current?.f.key, current?.review?.at]);
   const completed = s.reviews.length;
   async function save(status: string) {
     if (!current) return;
@@ -609,6 +615,29 @@ export function ReviewQueue() {
           </Button>
         }
       />
+      {s.mode === "live" && (
+        <div className="review-run-select">
+          <label>
+            Evaluation run
+            <FieldSelect
+              aria-label="Review evaluation run"
+              value={s.reviewRunId}
+              disabled={s.reviewLoading || s.busy}
+              options={s.runs.map((r) => ({
+                value: r.id,
+                label: `${r.name} · ${r.dataset} · v${r.version}`,
+              }))}
+              onValueChange={(id) => {
+                setIndex(0);
+                void s.loadReviewRun(id);
+              }}
+            />
+          </label>
+          {s.reviewLoading && (
+            <Busy label="Loading saved results and feedback…" />
+          )}
+        </div>
+      )}
       <div className="review-progress">
         <div>
           <span className="review-progress-icon">
@@ -647,12 +676,14 @@ export function ReviewQueue() {
           <Empty
             title={
               s.mode === "live"
-                ? "No fields loaded for review"
+                ? s.reviewRunId
+                  ? "No pending fields in this run"
+                  : "No fields loaded for review"
                 : "You’re all caught up."
             }
             description={
               s.mode === "live"
-                ? "Open a scored run in Evaluations and choose Inspect results to load its fields."
+                ? "Choose a saved evaluation above, or switch to All fields to inspect reviewed values."
                 : "Every uncertain field in this demo has a saved decision. Take the next step with a new experiment."
             }
             action={
@@ -722,7 +753,8 @@ export function ReviewQueue() {
                 <div>
                   <span>EXPECTED VALUE</span>
                   <strong>
-                    {current.f.expected === null
+                    {current.f.expected === null &&
+                    (!current.f.status || current.f.status === "unscored")
                       ? "Not annotated"
                       : displayValue(current.f.expected)}
                   </strong>
