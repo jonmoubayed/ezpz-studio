@@ -9,6 +9,7 @@ marked as unpriced instead of silently receiving an inaccurate rate.
 import copy
 import json
 import os
+import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from urllib.error import HTTPError, URLError
@@ -17,6 +18,8 @@ from urllib.request import Request, urlopen
 
 
 MODEL_CATALOG_TIMEOUT_SECONDS = 8
+MODEL_CATALOG_MAX_PAGES = 20
+BUILTIN_CATALOG_UPDATED_AT = "2026-09-06"
 
 DEFAULT_CREDENTIALS = {
     "openai": "OPENAI_API_KEY",
@@ -37,6 +40,7 @@ DEFAULT_ENDPOINTS = {
 # copy them into every processor draft.  Values are USD per 1M text tokens.
 MODEL_PRICING: Dict[str, Dict[str, Dict[str, Any]]] = {
     "openai": {
+        "gpt-6-astra": {"input_per_million": 10.0, "output_per_million": 50.0, "source": "https://developers.openai.com/api/docs/models/gpt-6-astra"},
         "gpt-5.6": {"input_per_million": 4.0, "output_per_million": 20.0, "source": "https://developers.openai.com/api/docs/models/gpt-5.6-sol"},
         "gpt-5.6-sol": {"input_per_million": 4.0, "output_per_million": 20.0, "source": "https://developers.openai.com/api/docs/models/gpt-5.6-sol"},
         "gpt-5.6-terra": {"input_per_million": 2.0, "output_per_million": 12.0, "source": "https://developers.openai.com/api/docs/models/gpt-5.6-terra"},
@@ -53,6 +57,10 @@ MODEL_PRICING: Dict[str, Dict[str, Dict[str, Any]]] = {
         "o4-mini": {"input_per_million": 1.1, "output_per_million": 4.4, "source": "https://developers.openai.com/api/docs/models/o4-mini"},
     },
     "anthropic": {
+        "claude-fable-5-1": {"input_per_million": 10.0, "output_per_million": 50.0, "source": "https://platform.claude.com/docs/en/models/overview"},
+        "claude-opus-5": {"input_per_million": 5.0, "output_per_million": 25.0, "source": "https://platform.claude.com/docs/en/models/overview"},
+        "claude-sonnet-5": {"input_per_million": 2.0, "output_per_million": 10.0, "source": "https://platform.claude.com/docs/en/models/overview"},
+        "claude-haiku-4-5": {"input_per_million": 1.0, "output_per_million": 5.0, "source": "https://platform.claude.com/docs/en/models/overview"},
         "claude-opus-4-1": {"input_per_million": 15.0, "output_per_million": 75.0, "source": "https://www.anthropic.com/pricing"},
         "claude-sonnet-4": {"input_per_million": 3.0, "output_per_million": 15.0, "source": "https://www.anthropic.com/pricing"},
         "claude-3-5-sonnet": {"input_per_million": 3.0, "output_per_million": 15.0, "source": "https://www.anthropic.com/pricing"},
@@ -78,7 +86,7 @@ MODEL_PRICING: Dict[str, Dict[str, Dict[str, Any]]] = {
 
 BUILTIN_MODEL_IDS = {
     "openai": [
-        "gpt-5.6",
+        "gpt-6-astra",
         "gpt-5.6-sol",
         "gpt-5.6-terra",
         "gpt-5.6-luna",
@@ -94,19 +102,18 @@ BUILTIN_MODEL_IDS = {
         "o4-mini",
     ],
     "anthropic": [
-        "claude-opus-4-1",
-        "claude-sonnet-4",
-        "claude-3-5-sonnet-20241022",
-        "claude-3-5-haiku-20241022",
-        "claude-3-opus-20240229",
-        "claude-3-haiku-20240307",
+        "claude-sonnet-5",
+        "claude-opus-5",
+        "claude-fable-5-1",
+        "claude-haiku-4-5-20251001",
     ],
     "gemini": [
+        "gemini-3.8-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-pro-preview",
+        "gemini-3.1-flash-lite",
         "gemini-2.5-pro",
         "gemini-2.5-flash",
-        "gemini-2.0-flash",
-        "gemini-1.5-pro",
-        "gemini-1.5-flash",
     ],
     "openai_compatible": [
         "llama3.2",
@@ -178,16 +185,32 @@ def _provider_records(provider: str, endpoint: Optional[str], api_key: Optional[
         if api_key:
             headers["x-api-key"] = api_key
         headers["anthropic-version"] = "2023-06-01"
-        payload = _fetch_json(_models_url(base), headers)
-        return payload.get("data") if isinstance(payload.get("data"), list) else []
     if provider == "gemini":
-        models_url = _models_url(base)
         if api_key:
-            models_url = _with_query(models_url, "key", api_key)
-        payload = _fetch_json(models_url, headers)
-        return payload.get("models") if isinstance(payload.get("models"), list) else []
-    payload = _fetch_json(_models_url(base), headers)
-    return payload.get("data") if isinstance(payload.get("data"), list) else []
+            headers["x-goog-api-key"] = api_key
+    url = _models_url(base)
+    records = []
+    seen_cursors = set()
+    for _ in range(MODEL_CATALOG_MAX_PAGES):
+        payload = _fetch_json(url, headers)
+        page = payload.get("models" if provider == "gemini" else "data")
+        if not isinstance(page, list):
+            raise ValueError("Provider returned an invalid model page")
+        records.extend(page)
+        if provider == "gemini":
+            cursor, parameter = payload.get("nextPageToken"), "pageToken"
+        else:
+            cursor = payload.get("last_id") if payload.get("has_more") else None
+            parameter = "after_id" if provider == "anthropic" else "after"
+            if payload.get("has_more") and not cursor:
+                raise ValueError("Provider omitted its next-page cursor")
+        if not cursor:
+            return records
+        if not isinstance(cursor, str) or cursor in seen_cursors:
+            raise ValueError("Provider repeated an invalid page cursor")
+        seen_cursors.add(cursor)
+        url = _with_query(_models_url(base), parameter, cursor)
+    raise ValueError("Provider model list exceeded the page limit")
 
 
 def _pricing_for(provider: str, model_id: str) -> Optional[Dict[str, Any]]:
@@ -198,7 +221,8 @@ def _pricing_for(provider: str, model_id: str) -> Optional[Dict[str, Any]]:
         return copy.deepcopy(exact)
     # Snapshot IDs normally use the priced alias as a prefix, e.g.
     # gpt-4.1-2025-04-14 or claude-3-5-sonnet-20241022.
-    matches = [key for key in entries if normalized_id.startswith(key + "-")]
+    matches = [key for key in entries if normalized_id.startswith(key + "-")
+               and re.fullmatch(r"(?:\d{4}-\d{2}-\d{2}|\d{8})", normalized_id[len(key) + 1:])]
     if not matches:
         return None
     return copy.deepcopy(entries[max(matches, key=len)])
@@ -256,6 +280,10 @@ def get_model_catalog(provider: str, endpoint: Optional[str] = None) -> Dict[str
 
     credential_name = DEFAULT_CREDENTIALS.get(normalized_provider)
     api_key = os.environ.get(credential_name or "")
+    if str(provider).lower() == "ollama":
+        api_key = None
+    elif normalized_provider == "openai_compatible":
+        api_key = os.environ.get("OPENAI_COMPATIBLE_API_KEY") or api_key
     warnings: List[str] = []
     records: List[Dict[str, Any]] = []
     source = "provider"
@@ -272,19 +300,29 @@ def get_model_catalog(provider: str, endpoint: Optional[str] = None) -> Dict[str
         warnings.append(_safe_refresh_error(error))
 
     models = [_normalize_record(normalized_provider, record) for record in records if isinstance(record, dict)]
-    models = [model for model in models if model]
+    models = list({model["id"]: model for model in models if model}.values())
     if not models:
         source = "built-in"
         models = _builtin_models(normalized_provider)
         if not warnings:
             warnings.append("The provider returned no models; showing the built-in model list.")
 
-    models.sort(key=lambda model: (str(model.get("name") or model.get("id")).lower(), str(model.get("id"))))
+    if source == "provider":
+        def created_time(model):
+            value = model.get("created")
+            if isinstance(value, (int, float)):
+                return float(value)
+            try:
+                return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
+            except (ValueError, TypeError, OverflowError):
+                return 0
+        models.sort(key=lambda model: (-created_time(model), model["id"]))
     return {
         "provider": normalized_provider,
         "source": source,
         "credential_configured": bool(api_key),
         "fetched_at": _utc_now(),
+        "builtin_updated_at": BUILTIN_CATALOG_UPDATED_AT,
         "warnings": warnings,
         "models": models,
     }

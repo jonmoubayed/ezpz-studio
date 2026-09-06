@@ -1,3 +1,5 @@
+import { versionConfig } from "../src/api";
+import { settingsAfterModelChange, modelSettingsError } from "../src/model-settings";
 import assert from "node:assert/strict";
 import {
   configPayload,
@@ -91,3 +93,22 @@ assert.equal(
   ).model.temperature,
   undefined,
 );
+
+const tuned = { ...defaultConfig, provider: "openai", model: "gpt-5.6-terra", modelSettings: {
+  reasoning_effort: "high", max_tokens: 8192, verbosity: "low", structured_outputs: true, system: "Extract carefully.",
+} };
+const tunedPayload = configPayload(tuned);
+assert.deepEqual(configPayload(versionConfig(tunedPayload)), tunedPayload);
+assert.deepEqual(normalizeRun({ id: "test", processor_version: tunedPayload }).config?.modelSettings, tuned.modelSettings);
+assert.equal(tunedPayload.prompt.reasoning_effort, "high");
+assert.equal(tunedPayload.prompt.max_tokens, 8192);
+const cleared = mergeEditableConfig({ ...tunedPayload, prompt: { ...tunedPayload.prompt, custom_option: "keep" } }, { ...tuned, modelSettings: {} });
+assert.deepEqual(cleared.prompt, { extraction: tuned.prompt, custom_option: "keep" });
+assert.equal(tunedPayload.prompt.reasoning_effort, "high", "Saved snapshots stay immutable");
+assert.deepEqual(settingsAfterModelChange(tuned.modelSettings), { max_tokens: 8192, system: "Extract carefully." });
+assert.equal(configPayload({ ...defaultConfig, modelSettings: { temperature: 0, structured_outputs: false } }).prompt.temperature, 0);
+assert.throws(() => configPayload({ ...tuned, modelSettings: { max_tokens: 0 } }), /Output token limit/);
+assert.throws(() => configPayload({ ...tuned, model: "gpt-6-astra", modelSettings: { reasoning_effort: "none" } }), /reasoning effort/);
+assert.match(modelSettingsError("anthropic", "claude-haiku-4-5", { thinking_budget: 4096, max_tokens: 4096 }), /smaller/);
+assert.equal(modelSettingsError("google", "gemini-2.5-flash", { thinking_budget: 0 }), "");
+console.log("PASS: processor model settings round trip, reset, provider changes, zero values, validation, and saved-version isolation.");

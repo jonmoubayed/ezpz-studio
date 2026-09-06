@@ -1,3 +1,4 @@
+import type { ModelSettings } from "./model-settings";
 export type Page =
   | "Overview"
   | "Playground"
@@ -93,6 +94,7 @@ export type Dataset = {
   members?: string[];
 };
 export type Config = {
+  modelSettings?: ModelSettings;
   provider: string;
   model: string;
   parser: string;

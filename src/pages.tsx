@@ -1,3 +1,6 @@
+import { ModelSettingsForm } from "./model-settings-form";
+import { settingsAfterModelChange } from "./model-settings";
+import { ModelPicker, builtinModels } from "./model-picker";
 import { isLowConfidence } from "./confidence";
 import { FieldSelect } from "./components/field-select";
 import { useState } from "react";
@@ -499,7 +502,11 @@ export function ConfigForm({
   showSchema?: boolean;
 }) {
   const s = useStudio();
-  const patch = (p: Partial<Config>) => onChange({ ...config, ...p });
+  const patch = (p: Partial<Config>) => onChange({
+    ...config, ...p,
+    ...((p.provider !== undefined && p.provider !== config.provider) || (p.model !== undefined && p.model !== config.model)
+      ? { modelSettings: p.provider === "local" ? {} : settingsAfterModelChange(config.modelSettings) } : {}),
+  });
   return (
     <div className="config-form">
       <div className="form-row">
@@ -518,9 +525,9 @@ export function ConfigForm({
                   (
                     {
                       local: "deterministic-local",
-                      openai: "gpt-4.1",
-                      anthropic: "claude-sonnet-4-20250514",
-                      google: "gemini-2.5-flash",
+                      openai: builtinModels("openai")[0],
+                      anthropic: builtinModels("anthropic")[0],
+                      google: builtinModels("google")[0],
                       ollama: "qwen3:8b",
                       "openai-compatible": "custom-model",
                     } as Record<string, string>
@@ -543,14 +550,13 @@ export function ConfigForm({
             }
           />
         </label>
-        <label>
-          Model ID
-          <input
-            value={config.model}
-            onChange={(e) => patch({ model: e.target.value })}
-            placeholder="Enter any model ID"
-          />
-        </label>
+        <ModelPicker
+          provider={config.provider}
+          endpoint={["ollama", "openai-compatible"].includes(config.provider) ? config.baseUrl : undefined}
+          value={config.model}
+          onChange={(model) => patch({ model })}
+          live={s.mode === "live"}
+        />
       </div>
       {["ollama", "openai-compatible"].includes(config.provider) && (
         <label>
@@ -562,6 +568,8 @@ export function ConfigForm({
           />
         </label>
       )}
+      <ModelSettingsForm provider={config.provider} model={config.model}
+        value={config.modelSettings} onChange={modelSettings => patch({ modelSettings })} />
       <label>
         Document parser
         <FieldSelect

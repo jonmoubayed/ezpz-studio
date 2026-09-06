@@ -1,0 +1,9 @@
+.model-settings { border: 1px solid var(--border, #dce2d5); border-radius: 6px; }
+.model-settings > summary { display: flex; justify-content: space-between; gap: 12px; cursor: pointer; padding: 10px 12px; font-size: 12px; font-weight: 600; }
+.model-settings-body { padding: 0 12px 12px; display: flex; flex-direction: column; gap: 12px; }
+.model-settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.model-settings-grid label { min-width: 0; }
+.model-settings-grid input, .model-settings-grid .field-select-trigger { width: 100%; min-width: 0; }
+.model-settings-hint { font-size: 12px; color: var(--muted, #68756d); line-height: 1.5; margin: 0; }
+.model-settings-body > .btn { align-self: flex-start; }
+@media (max-width: 600px) { .model-settings-grid { grid-template-columns: minmax(0, 1fr); } }

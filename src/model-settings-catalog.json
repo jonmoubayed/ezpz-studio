@@ -1,0 +1,166 @@
+[
+  {
+    "provider": "openai",
+    "prefixes": [
+      "gpt-6-astra"
+    ],
+    "efforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ],
+    "sampling": false
+  },
+  {
+    "provider": "openai",
+    "prefixes": [
+      "gpt-5.6"
+    ],
+    "efforts": [
+      "none",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ],
+    "sampling": false,
+    "verbosity": true
+  },
+  {
+    "provider": "openai",
+    "prefixes": [
+      "gpt-5"
+    ],
+    "efforts": [
+      "low",
+      "medium",
+      "high"
+    ],
+    "sampling": false,
+    "verbosity": true
+  },
+  {
+    "provider": "openai",
+    "prefixes": [
+      "o1",
+      "o3",
+      "o4"
+    ],
+    "efforts": [
+      "low",
+      "medium",
+      "high"
+    ],
+    "sampling": false
+  },
+  {
+    "provider": "anthropic",
+    "prefixes": [
+      "claude-sonnet-5",
+      "claude-opus-5",
+      "claude-fable-5",
+      "claude-opus-4-7",
+      "claude-opus-4-8"
+    ],
+    "efforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ],
+    "sampling": false,
+    "adaptive": true
+  },
+  {
+    "provider": "anthropic",
+    "prefixes": [
+      "claude-sonnet-4-6"
+    ],
+    "efforts": [
+      "low",
+      "medium",
+      "high"
+    ],
+    "adaptive": true
+  },
+  {
+    "provider": "anthropic",
+    "prefixes": [
+      "claude-opus-4-6"
+    ],
+    "efforts": [
+      "low",
+      "medium",
+      "high",
+      "max"
+    ],
+    "adaptive": true
+  },
+  {
+    "provider": "anthropic",
+    "prefixes": [
+      "claude-haiku-4-5",
+      "claude-sonnet-4-5"
+    ],
+    "budget_min": 1024,
+    "budget_max": 63999
+  },
+  {
+    "provider": "gemini",
+    "prefixes": [
+      "gemini-3.8-flash",
+      "gemini-3.7-flash",
+      "gemini-3.1-pro"
+    ],
+    "efforts": [
+      "low",
+      "medium",
+      "high"
+    ]
+  },
+  {
+    "provider": "gemini",
+    "prefixes": [
+      "gemini-3.6-flash",
+      "gemini-3.5-flash",
+      "gemini-3.1-flash-lite",
+      "gemini-3-flash"
+    ],
+    "efforts": [
+      "minimal",
+      "low",
+      "medium",
+      "high"
+    ]
+  },
+  {
+    "provider": "gemini",
+    "prefixes": [
+      "gemini-3-pro"
+    ],
+    "efforts": [
+      "low",
+      "high"
+    ]
+  },
+  {
+    "provider": "gemini",
+    "prefixes": [
+      "gemini-2.5-pro"
+    ],
+    "budget_min": 128,
+    "budget_max": 32768
+  },
+  {
+    "provider": "gemini",
+    "prefixes": [
+      "gemini-2.5-flash"
+    ],
+    "budget_min": 0,
+    "budget_max": 24576
+  }
+]

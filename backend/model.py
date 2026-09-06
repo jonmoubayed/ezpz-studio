@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from .confidence import CONFIDENCE_INSTRUCTIONS, mark_model_confidence, response_schema, strict_response_schema
 from .adapters import normalize_model_config, normalize_model_provider
+from .model_settings import validate_model_settings
 from .models import DocumentIR, Evidence, ModelResult
 
 
@@ -110,13 +111,27 @@ class AnthropicModel:
         self.provider = "anthropic"
 
     def request_payload(self, document_ir: DocumentIR, schema: Dict[str, Any], prompt: Dict[str, Any]) -> Dict[str, Any]:
-        return {
+        caps = validate_model_settings(self.provider, self.model, prompt)
+        message = {
             "model": self.model,
             "max_tokens": int(prompt.get("max_tokens", 4096)),
-            "temperature": float(prompt.get("temperature", 0)),
             "system": prompt.get("system") or DEFAULT_SYSTEM_PROMPT,
             "messages": [{"role": "user", "content": extraction_text(schema, prompt, document_ir)}],
         }
+
+        # Current adaptive-thinking Claude models reject custom sampling.
+        if prompt.get("reasoning_effort"):
+            message["output_config"] = {"effort": prompt["reasoning_effort"]}
+            if caps["adaptive"]:
+                message["thinking"] = {"type": "adaptive"}
+        if "thinking_budget" in prompt:
+            message["thinking"] = {"type": "enabled", "budget_tokens": prompt["thinking_budget"]}
+        if caps["sampling"] and "thinking" not in message:
+            if "top_p" in prompt:
+                message["top_p"] = prompt["top_p"]
+            else:
+                message["temperature"] = float(prompt.get("temperature", 0))
+        return message
 
     def run(self, document_ir: DocumentIR, schema: Dict[str, Any], prompt: Dict[str, Any]) -> ModelResult:
         if not self.api_key:
@@ -171,6 +186,7 @@ class OpenAICompatibleModel:
         self.requires_api_key = self.provider == "openai" if requires_api_key is None else bool(requires_api_key)
 
     def request_payload(self, document_ir: DocumentIR, schema: Dict[str, Any], prompt: Dict[str, Any]) -> Dict[str, Any]:
+        caps = validate_model_settings(self.provider, self.model, prompt)
         # JSON object mode is supported by most OpenAI-compatible local
         # servers. Native OpenAI can opt into Structured Outputs explicitly.
         response_format = {"type": "json_object"}
@@ -187,13 +203,19 @@ class OpenAICompatibleModel:
                 {"role": "user", "content": extraction_text(schema, prompt, document_ir)},
             ],
         }
-        if self.model.lower().startswith(("gpt-5", "o1", "o3", "o4")):
+        if not caps["sampling"]:
             # Reasoning models use the completion-token budget and may reject
             # sampling parameters such as temperature.
             message["max_completion_tokens"] = int(prompt.get("max_tokens", 4096))
         else:
             message["temperature"] = float(prompt.get("temperature", 0))
             message["max_tokens"] = int(prompt.get("max_tokens", 4096))
+            if "top_p" in prompt:
+                message["top_p"] = prompt["top_p"]
+        if prompt.get("reasoning_effort"):
+            message["reasoning_effort"] = prompt["reasoning_effort"]
+        if prompt.get("verbosity"):
+            message["verbosity"] = prompt["verbosity"]
         return message
 
     def run(self, document_ir: DocumentIR, schema: Dict[str, Any], prompt: Dict[str, Any]) -> ModelResult:
@@ -237,6 +259,7 @@ class GeminiModel:
         self.provider = "gemini"
 
     def request_payload(self, document_ir: DocumentIR, schema: Dict[str, Any], prompt: Dict[str, Any]) -> Dict[str, Any]:
+        caps = validate_model_settings(self.provider, self.model, prompt)
         return {
             "systemInstruction": {"parts": [{"text": prompt.get("system") or DEFAULT_SYSTEM_PROMPT}]},
             "contents": [{"role": "user", "parts": [{"text": extraction_text(schema, prompt, document_ir)}]}],
@@ -244,6 +267,9 @@ class GeminiModel:
                 "temperature": float(prompt.get("temperature", 0)),
                 "maxOutputTokens": int(prompt.get("max_tokens", 4096)),
                 "responseMimeType": "application/json",
+                **({"topP": prompt["top_p"]} if "top_p" in prompt else {}),
+                **({"thinkingConfig": {"thinkingLevel": prompt["reasoning_effort"].upper()}} if prompt.get("reasoning_effort") else {}),
+                **({"thinkingConfig": {"thinkingBudget": prompt["thinking_budget"]}} if "thinking_budget" in prompt else {}),
                 **({"responseJsonSchema": response_schema(schema)} if prompt.get("structured_outputs") else {}),
             },
         }

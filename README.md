@@ -118,6 +118,8 @@ Evaluation accuracy measures extracted fields against ground truth. An unannotat
 
 ## Bring your own models and parsers
 
+The model picker includes current suggestions and a **Check for new models** action in the live studio. See [model discovery](docs/model-discovery.md) for refresh behavior and updating the offline catalog.
+
 The backend adapters support OpenAI, Anthropic, Google Gemini, Ollama, and OpenAI-compatible endpoints. You can enter a custom model ID; availability depends on the configured service. Native text, Docling, and LlamaParse are the current parser choices.
 
 Put provider credentials in the **backend's** environment or `.env` file, then restart the backend. Never put provider secrets in frontend `VITE_*` variables. See [provider configuration](docs/configuration.md#models-and-parsers) for the supported environment names and local endpoint setup.
