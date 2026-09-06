@@ -9,6 +9,7 @@ SDK or leaking credentials into processor versions.
 
 from copy import deepcopy
 from typing import Any, Dict, List, Optional
+from .model_catalog import BUILTIN_MODEL_IDS
 
 
 OPENAI_COMPATIBLE_PROVIDERS = {
@@ -40,7 +41,7 @@ LLM_ADAPTERS: Dict[str, Dict[str, Any]] = {
         "kind": "openai",
         "credential_env": "OPENAI_API_KEY",
         "default_endpoint": "https://api.openai.com/v1",
-        "models": ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-5", "gpt-5-mini", "o3", "o4-mini"],
+        "models": BUILTIN_MODEL_IDS["openai"],
         "description": "OpenAI Chat Completions with schema-aware JSON output.",
     },
     "anthropic": {
@@ -48,7 +49,7 @@ LLM_ADAPTERS: Dict[str, Dict[str, Any]] = {
         "kind": "anthropic",
         "credential_env": "ANTHROPIC_API_KEY",
         "default_endpoint": "https://api.anthropic.com/v1",
-        "models": ["claude-sonnet-4", "claude-opus-4-1", "claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022"],
+        "models": BUILTIN_MODEL_IDS["anthropic"],
         "description": "Anthropic Messages API with system/user prompt separation.",
     },
     "gemini": {
@@ -56,7 +57,7 @@ LLM_ADAPTERS: Dict[str, Dict[str, Any]] = {
         "kind": "gemini",
         "credential_env": "GEMINI_API_KEY",
         "default_endpoint": "https://generativelanguage.googleapis.com/v1beta",
-        "models": ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash"],
+        "models": BUILTIN_MODEL_IDS["gemini"],
         "description": "Gemini generateContent with native JSON response configuration.",
     },
     "ollama": {

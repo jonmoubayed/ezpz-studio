@@ -1,3 +1,4 @@
+import { readModelSettings, settingsPrompt } from "./model-settings.ts";
 import { confidenceFromResponse } from "./confidence";
 import { expectedValue, extractionCitations } from "./result-model";
 import type {
@@ -38,7 +39,7 @@ const post = (path: string, body: unknown) =>
   request(path, { method: "POST", body: JSON.stringify(body) });
 export const configPayload = (c: Config) => ({
   schema: JSON.parse(c.schema),
-  prompt: { extraction: c.prompt },
+  prompt: settingsPrompt(c),
   parser: { name: c.parser, version: "1" },
   model: {
     provider: c.provider,
@@ -69,6 +70,7 @@ export function normalizeRun(r: any): Run {
           model: r.processor_version.model?.name || "",
           parser: r.processor_version.parser?.name || "",
           prompt: r.processor_version.prompt?.extraction || "",
+          modelSettings: readModelSettings(r.processor_version.prompt),
           schema: JSON.stringify(r.processor_version.schema ?? {}, null, 2),
           baseUrl: r.processor_version.model?.base_url || "",
         }
@@ -302,6 +304,7 @@ export function versionConfig(v: any): Config {
     model: v.model?.name || "",
     parser: v.parser?.name || "native",
     prompt: v.prompt?.extraction || "",
+    modelSettings: readModelSettings(v.prompt),
     schema: JSON.stringify(
       v.schema ?? { type: "object", properties: {} },
       null,
@@ -367,7 +370,7 @@ export function mergeEditableConfig(base: any, config: Config) {
       ...(base?.model?.provider === config.provider ? base.model : {}),
       ...editable.model,
     },
-    prompt: { ...base?.prompt, ...editable.prompt },
+    prompt: settingsPrompt(config, base?.prompt),
   };
   if (!["ollama", "openai-compatible"].includes(config.provider))
     delete merged.model.base_url;
