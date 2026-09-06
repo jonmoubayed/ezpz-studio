@@ -14,6 +14,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends tesseract-ocr t
     && groupadd --gid 10001 studio && useradd --uid 10001 --gid studio --create-home studio \
     && mkdir -p /app /data && chown studio:studio /data
 WORKDIR /app
+LABEL org.opencontainers.image.source="https://github.com/jonmoubayed/ezpz-studio" \
+      org.opencontainers.image.licenses="MIT"
 COPY requirements.lock ./
 RUN pip install --no-cache-dir -r requirements.lock
 COPY backend ./backend

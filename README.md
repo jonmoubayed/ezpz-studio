@@ -67,6 +67,8 @@ Open [ezpz studio](http://127.0.0.1:5180). The service includes the frontend, AP
 
 The [beta checks workflow](https://github.com/jonmoubayed/ezpz-studio/actions/workflows/ci.yml) produces ARM64 and AMD64 bundles after successful checks. These bundles include the image: extract one and run `./start.sh` (macOS/Linux) or `./start.ps1` (Windows PowerShell). No source build or registry login is needed. See [deployment](docs/deployment.md) for credentials, alternate ports, backup/restore, and upgrades.
 
+Registry publishing is available through the **Publish container image** workflow. Once a version is published, use the [GHCR deployment instructions](docs/deployment.md#pull-a-published-image) to pull it without building from source.
+
 To develop without Docker, use **Node.js 22.12+** and **Python 3.12**:
 
 ```bash

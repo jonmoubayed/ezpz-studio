@@ -17,6 +17,25 @@ Set `EZPZ_PORT=5186` in `.env` if port 5180 is occupied. The image is included i
 
 Windows PowerShell launch support is provided, but the host-specific Windows installer has not been exercised locally. The application and lifecycle tests run against Linux containers.
 
+## Pull a published image
+
+After a maintainer publishes the version below to GHCR, set this in your installation folder's `.env`:
+
+```dotenv
+EZPZ_IMAGE=ghcr.io/jonmoubayed/ezpz-studio:0.1.0-beta.1
+```
+
+With `compose.yaml` in the same folder, run:
+
+```bash
+docker compose pull studio
+docker compose up -d --no-build
+```
+
+The version tag supports Linux AMD64 and ARM64; Docker selects the matching image. Keep the existing Compose project name and data volume when upgrading. Source builds and the offline bundles still work separately.
+
+A repository being public does not make its GHCR package public. After the first publication, the maintainer must open the package settings and change its visibility to public for anonymous pulls. Until then, pulling requires a GitHub login with package read access. A missing tag or private package can both appear as a denied pull.
+
 ## Build from source
 
 From the repository root:
@@ -113,4 +132,10 @@ npm run release:bundle
 npm run test:install
 ```
 
-Bundles and checksums are written to the ignored `release/` directory. CI builds and checks ARM64 and AMD64 artifacts. Registry publication and a public release require a configured repository and registry destination.
+Bundles and checksums are written to the ignored `release/` directory. CI builds and checks ARM64 and AMD64 artifacts.
+
+### Publish to GitHub Container Registry
+
+Run **Publish container image** from the repository Actions tab, or push a `v`-prefixed tag matching `package.json` (for example, `v0.1.0-beta.1`). The workflow reruns both native architecture checks, then publishes those exact tested bundle images to `ghcr.io/jonmoubayed/ezpz-studio`. It requires both jobs to pass before publishing. Version tags select both architectures; `sha-<full-commit>` tags identify the source revision. The workflow does not set a `latest` tag for this beta.
+
+The publish job uses the repository's `GITHUB_TOKEN` with `packages: write`; no personal registry token is needed. The image source label links the package to this repository. After the first successful run, set package visibility to public and verify an anonymous pull before advertising it for public deployment. Publish new releases with a new package version so existing deployments remain reproducible.

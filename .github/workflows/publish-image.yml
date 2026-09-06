@@ -1,0 +1,83 @@
+name: Publish container image
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+concurrency:
+  group: publish-container
+  cancel-in-progress: false
+jobs:
+  verify:
+    uses: ./.github/workflows/ci.yml
+  publish:
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select registry image and version
+        id: image
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "Release tag must match package.json: v$version" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: beta-package-*
+          path: release-artifacts
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish the tested images and multi-platform tags
+        shell: bash
+        env:
+          VERSION: ${{ steps.image.outputs.version }}
+          IMAGE: ${{ steps.image.outputs.name }}
+        run: |
+          set -euo pipefail
+          cd release-artifacts
+          refs=()
+          for arch in amd64 arm64; do
+            bundle="ezpz-studio-$VERSION-$arch"
+            sha256sum --check "$bundle.tar.gz.sha256"
+            directory=$(mktemp -d)
+            tar -xzf "$bundle.tar.gz" -C "$directory" "$bundle/image.tar.gz"
+            docker load --input "$directory/$bundle/image.tar.gz"
+            actual=$(docker image inspect "ezpz-studio:$VERSION" --format '{{.Os}}/{{.Architecture}}')
+            test "$actual" = "linux/$arch"
+            ref="$IMAGE:sha-$GITHUB_SHA-$arch"
+            docker tag "ezpz-studio:$VERSION" "$ref"
+            docker push "$ref"
+            refs+=("$ref")
+            rm -rf "$directory"
+          done
+          docker buildx imagetools create \
+            --tag "$IMAGE:$VERSION" \
+            --tag "$IMAGE:sha-$GITHUB_SHA" \
+            "${refs[@]}"
+          docker buildx imagetools inspect "$IMAGE:$VERSION" --raw > manifest.json
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const manifest = JSON.parse(readFileSync("manifest.json", "utf8"));
+            for (const arch of ["amd64", "arm64"]) {
+              if (!manifest.manifests?.some(m => m.platform?.os === "linux" && m.platform.architecture === arch)) {
+                throw new Error(`Published image is missing linux/${arch}`);
+              }
+            }
+          '
+          printf 'Published `%s:%s` for Linux AMD64 and ARM64.\n' "$IMAGE" "$VERSION" >> "$GITHUB_STEP_SUMMARY"
+          printf '\nFor anonymous pulls, set this GHCR package to public after its first publication.\n' >> "$GITHUB_STEP_SUMMARY"

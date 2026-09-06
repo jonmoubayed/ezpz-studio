@@ -3,6 +3,7 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+  workflow_call:
 permissions:
   contents: read
 jobs:
@@ -28,7 +29,9 @@ jobs:
       - run: npm test
       - run: npm run test:integration
       - run: npx playwright install --with-deps chromium
-      - run: docker build -t ezpz-studio:0.1.0-beta.1 .
+      - name: Select package image
+        run: echo "EZPZ_TEST_IMAGE=ezpz-studio:$(node -p "require('./package.json').version")" >> "$GITHUB_ENV"
+      - run: docker build -t "$EZPZ_TEST_IMAGE" .
       - run: npm run test:package
       - run: npm run release:bundle
       - run: npm run test:install
