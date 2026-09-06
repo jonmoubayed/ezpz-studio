@@ -81,3 +81,11 @@ Browser drafts are separate from backend versions. Save a processor version befo
 The backend is included in this repository. Historical patches in `patches/` are not needed for this version.
 
 Use [the deployment guide](deployment.md) for Docker installation, persistent volumes, backup/restore, model endpoints, upgrades, and beta limits. Source-development data defaults to `.ezpz/`; container data lives in `/data`.
+
+## Copy a processor as Python
+
+Open **Code snippet** or the **Code** tab in the processor editor, then choose **Copy code**. The preview uses the current working configuration, including the parser, model ID, endpoint, instructions, and full JSON Schema. Apply or discard pending JSON edits before copying.
+
+The snippet includes dependency installation, environment-variable names, a document path argument, parsing, and the provider-specific extraction request. Native parsing and the local deterministic model use the repository's Python adapters, so run those snippets from the repository root. The deterministic model remains an invoice heuristic and does not support arbitrary instructions or fields. Docling and LlamaParse snippets with hosted models can run independently.
+
+OpenAI receives a non-strict JSON Schema, Anthropic receives a tool input schema, Gemini receives a response JSON Schema, and Ollama receives its native schema format. Other OpenAI-compatible endpoints use JSON mode with the schema in the prompt. Supported schema keywords depend on the selected service and model. API keys are read from environment variables. Copying code does not run requests in the studio.

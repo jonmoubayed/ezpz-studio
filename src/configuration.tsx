@@ -19,6 +19,7 @@ import {
   type SchemaBuilderSchema,
 } from "./components/extend/schema-builder";
 import { readSchema, writeSchema, type SchemaDocument } from "./schema-adapter";
+import { ProcessorCodePanel } from "./processor-code-panel";
 import { ConfigForm } from "./pages";
 import { useStudio } from "./store";
 import { Badge, Button, Busy, Empty, Heading } from "./ui";
@@ -155,6 +156,9 @@ export function Configuration() {
         }
         actions={
           <>
+            <Button onClick={() => setPane("code")}>
+              <Code2 size={14} /> Code snippet
+            </Button>
             <Button
               disabled={!valid || s.busy}
               onClick={() =>
@@ -230,6 +234,9 @@ export function Configuration() {
                 <Braces size={14} />
                 Results{" "}
                 {preview && <span>{preview.document.fields.length}</span>}
+              </TabsTrigger>
+              <TabsTrigger value="code">
+                <Code2 size={14} /> Code
               </TabsTrigger>
             </TabsList>
           </div>
@@ -412,6 +419,9 @@ export function Configuration() {
                 </div>
               </div>
             </div>
+          </TabsContent>
+          <TabsContent value="code" className="processor-code-content">
+            <ProcessorCodePanel config={s.config} valid={valid} />
           </TabsContent>
           <TabsContent
             value="results"

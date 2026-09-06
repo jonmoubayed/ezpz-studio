@@ -4278,7 +4278,8 @@ h1 {
   background: #e5eadd;
 }
 .processor-config-content,
-.processor-results-content {
+.processor-results-content,
+.processor-code-content {
   flex: 1;
   min-height: 0;
   overflow: auto;
@@ -4530,3 +4531,15 @@ h1 {
 /* Public demo identity */
 .brand strong, .brand strong span { color: #365d47; }
 .brand-mark img, .banner-icon img { display: block; flex: none; object-fit: contain; }
+
+/* Generated processor code preview. */
+.processor-code-panel { display: flex; flex-direction: column; gap: 14px; min-width: 0; height: 100%; }
+.processor-code-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.processor-code-heading h2 { font-size: 14px; font-weight: 550; margin: 0 0 5px; }
+.processor-code-heading p { font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+.processor-code-heading button { flex-shrink: 0; }
+.processor-code-note, .processor-code-setup { font-size: 11px; line-height: 1.7; color: var(--muted); }
+.processor-code-setup { list-style: disc; padding-left: 18px; overflow-wrap: anywhere; }
+.processor-code-editor { width: 100%; flex: 1; min-height: 300px; resize: vertical; padding: 16px; border: 1px solid var(--border); border-radius: 8px; background: #f7f9f4; color: #263321; font: 11px/1.8 var(--font-mono); tab-size: 4; }
+.processor-code-editor:focus-visible { outline: 2px solid #6f8755; outline-offset: 2px; }
+.processor-code-status { font-size: 11px; min-height: 18px; color: var(--muted); }
