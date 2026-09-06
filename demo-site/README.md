@@ -25,6 +25,18 @@ Configure the static host's project root as `demo-site`, its build command as `p
 
 Serve the output at the domain root, with `studio/index.html` retained. No backend, Python process, API keys, functions, or proxy is required. This directory's location in the repository does not mean it can be served under a `/demo-site/` URL prefix; asset URLs currently require a domain root.
 
+## Cloudflare Workers
+
+Connect this repository's `main` branch and set the root directory to `demo-site`.
+
+- Build command: `pnpm install --frozen-lockfile && pnpm build && pnpm test:demo`
+- Deploy command: `npx wrangler deploy`
+- Build variables: `NODE_VERSION=24` and `PNPM_VERSION=11.17.0`
+
+The committed `wrangler.jsonc` sets the Worker name to `ezpz-studio`, the compatibility date to `2026-09-03`, and the static assets directory to `dist`. No Worker script or backend is deployed. Cloudflare handles HTML index routes; unknown paths return 404.
+
+Remove old `--name ezpz-demo` arguments from the dashboard's deploy command. Deploy the latest commit after saving the settings, rather than retrying an older commit without this configuration.
+
 ## What the demo does
 
 - Sample extraction, evaluation scores, and review data are simulated.
