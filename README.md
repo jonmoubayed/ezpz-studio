@@ -22,7 +22,7 @@ Getting JSON out of a document is only the beginning. You also need to see where
 
 ezpz brings that loop into one workspace. Keep the source document beside your schema and results. Save reusable processors for invoices, 1099s, receipts, contracts, or your own document types. Build a benchmark, compare experiments, and inspect the fields behind the score—all while choosing your own model and parser.
 
-You do not need an Extend account or an Extend extraction model. The studio uses open-source Extend UI components for document viewing and schema editing.
+ezpz uses open-source Extend UI components for document viewing and schema editing, while extraction is handled independently through your configured models and parsers.
 
 > **Project status:** local, single-user beta — **0.1.0-beta.1**. This repository contains the complete React frontend and Python backend. Run the bundled Docker service, or develop both from this checkout. See [deployment and backups](docs/deployment.md) for installation and beta limits.
 
