@@ -109,12 +109,20 @@ export function extractionFields(e: any, groundTruth?: any): Field[] {
   return Object.entries(e?.result?.fields || {}).map(
     ([key, v]: [string, any]) => {
       const citations = extractionCitations(e, v?.evidence);
+      // Some structured extractors return a quoted excerpt alongside each
+      // value instead of geometric evidence. Keep it for PDF text grounding.
+      const parent = key.includes(".") ? key.slice(0, key.lastIndexOf(".")) : "";
+      const excerpt = parent && e?.result?.fields?.[`${parent}.excerpt`]?.value;
+      const location = parent && e?.result?.fields?.[`${parent}.location`]?.value;
       return {
         key,
         value: v?.value ?? null,
         ...expectedValue(groundTruth?.value, key),
         ...confidenceFromResponse(v),
         citations,
+        ...(typeof excerpt === "string" && excerpt.trim()
+          ? { sourceExcerpt: excerpt, sourceLocation: typeof location === "string" ? location : undefined }
+          : {}),
         page: citations[0]?.page || 1,
         ...(citations[0] ? { area: citations[0].area } : {}),
       };

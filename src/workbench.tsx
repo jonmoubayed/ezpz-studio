@@ -57,14 +57,19 @@ import {
   type JsonValue,
   type Document,
   type Field,
+  type Citation,
 } from "./domain";
 import * as api from "./api";
 export function SourceViewer({
   document,
   field,
+  onCitationsResolved,
+  onCitationStatus,
 }: {
   document: Document;
   field?: Field;
+  onCitationsResolved?: (citations: Citation[]) => void;
+  onCitationStatus?: (status: string) => void;
 }) {
   const viewer = useRef<PDFViewerHandle>(null);
   const container = useRef<HTMLDivElement>(null);
@@ -79,11 +84,42 @@ export function SourceViewer({
   }, []);
   const [text, setText] = useState("");
   const [viewerReady, setViewerReady] = useState(0);
+  const [viewerSource, setViewerSource] = useState("");
+  const [grounded, setGrounded] = useState<{ key: string; citations: Citation[] }>();
+  const citationKey = `${document.id}:${field?.key}`;
+  const resolvedCallback = useRef(onCitationsResolved);
+  const statusCallback = useRef(onCitationStatus);
+  resolvedCallback.current = onCitationsResolved;
+  statusCallback.current = onCitationStatus;
   const citations = field?.citations?.length
     ? field.citations
     : field?.area
       ? [{ page: field.page || 1, area: field.area }]
-      : [];
+      : grounded?.key === citationKey ? grounded.citations : [];
+  useEffect(() => {
+    if (field?.area || !field?.sourceExcerpt || viewerSource !== document.src || !viewerReady || !viewer.current) return;
+    const abort = new AbortController();
+    // Capture these callbacks so a field switch can't receive an older result.
+    const onResolved = resolvedCallback.current;
+    const onStatus = statusCallback.current;
+    onStatus?.("Locating source excerpt…");
+    viewer.current.locateExcerpt(field.sourceExcerpt, field.sourceLocation, abort.signal)
+      .then((matches) => {
+        if (abort.signal.aborted) return;
+        setGrounded({ key: citationKey, citations: matches });
+        if (matches.length) {
+          viewer.current?.scrollToPageArea(matches[0].page, matches[0].area);
+          onResolved?.(matches);
+          onStatus?.(`Highlighted source excerpt · page ${matches[0].page}`);
+        } else {
+          onStatus?.("Saved excerpt could not be located in the PDF");
+        }
+      })
+      .catch(() => {
+        if (!abort.signal.aborted) onStatus?.("Source excerpt lookup unavailable");
+      });
+    return () => abort.abort();
+  }, [citationKey, document.src, field?.area, field?.sourceExcerpt, field?.sourceLocation, viewerReady, viewerSource]);
   useEffect(() => {
     if (field?.area)
       viewer.current?.scrollToPageArea(field.page || 1, field.area);
@@ -112,9 +148,10 @@ export function SourceViewer({
         >
           <PDFViewer
             ref={viewer}
-            onDocumentLoadSuccess={() =>
-              requestAnimationFrame(() => setViewerReady((v) => v + 1))
-            }
+            onDocumentLoadSuccess={() => {
+              setViewerSource(document.src);
+              requestAnimationFrame(() => setViewerReady((v) => v + 1));
+            }}
             defaultZoom={Math.max(0.25, Math.min(1, (viewerWidth - 40) / 612))}
             src={document.src}
             fileName={document.name}
