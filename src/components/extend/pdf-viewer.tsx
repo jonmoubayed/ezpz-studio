@@ -60,6 +60,8 @@ import { flushSync } from "react-dom"
 
 import { loadSharedPdfEngine } from "@/lib/pdf-thumbnail-utils"
 import { cn } from "@/lib/utils"
+import { locatePdfExcerpt } from "@/lib/pdf-excerpt"
+import type { Citation } from "@/domain"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -104,6 +106,7 @@ export type PDFViewerPageOverlayProps = {
   rotation: number
 }
 export type PDFViewerHandle = {
+  locateExcerpt: (excerpt: string, location?: string, signal?: AbortSignal) => Promise<Citation[]>
   scrollToPage: (pageNumber: number, options?: ScrollIntoViewOptions) => void
   scrollToPageArea: (
     pageNumber: number,
@@ -2081,6 +2084,10 @@ function PDFViewerInner({
   React.useImperativeHandle(
     viewerRef,
     () => ({
+      locateExcerpt: (excerpt, location, signal) =>
+        pdfDocument && registry
+          ? locatePdfExcerpt(registry.getEngine(), pdfDocument, excerpt, location, signal)
+          : Promise.resolve([]),
       scrollToPage,
       scrollToPageArea: (pageNumber, area, options) => {
         const pageSize = pdfDocument?.pages[pageNumber - 1]?.size
@@ -2100,7 +2107,7 @@ function PDFViewerInner({
       },
       getViewportElement: () => viewportElementRef.current,
     }),
-    [pdfDocument, scroll, scrollToPage]
+    [pdfDocument, registry, scroll, scrollToPage]
   )
   const handleDownload = React.useCallback(async () => {
     if (!pdfFile || isPreparingDownload) return

@@ -22,6 +22,8 @@ export function HumanReviewHighlight({
         REVIEW_HIGHLIGHT_STYLE,
       )}
       style={{
+        // Keep citations visible above the app's unlayered global border reset.
+        borderColor: "rgba(59, 130, 246, 0.7)",
         left: `${area.left}%`,
         top: `${area.top}%`,
         width: `${area.width}%`,

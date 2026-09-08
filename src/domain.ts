@@ -23,6 +23,8 @@ export type Citation = {
   area: { left: number; top: number; width: number; height: number };
 };
 export type Field = {
+  sourceExcerpt?: string;
+  sourceLocation?: string;
   hasExpected?: boolean;
   citations?: Citation[];
   key: string;

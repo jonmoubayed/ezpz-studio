@@ -20,6 +20,16 @@ const extraction = {
   },
 };
 const field = extractionFields(extraction, { value: { total: 0 } })[0];
+const quotedFields = extractionFields({ result: { fields: {
+  "months.value": { value: "12", evidence: [] },
+  "months.excerpt": { value: "In each of the first twelve months" },
+  "months.location": { value: "Page 2, Section 2.3" },
+  "other.value": { value: "days" },
+} } });
+assert.equal(quotedFields[0].sourceExcerpt, "In each of the first twelve months");
+assert.equal(quotedFields[0].sourceLocation, "Page 2, Section 2.3");
+assert.equal(quotedFields[0].area, undefined, "Excerpts must not fabricate geometry");
+assert.equal(quotedFields[3].sourceExcerpt, undefined, "Do not borrow evidence from another field");
 assert.equal(field.area?.left, 10);
 assert.equal(field.area?.top, 20);
 assert.ok(Math.abs(field.area!.width - 30) < 1e-8);

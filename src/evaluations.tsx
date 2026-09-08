@@ -984,6 +984,7 @@ function EvaluationResults({ run }: { run: Run }) {
   const [search, setSearch] = useState("");
   const [fieldFilter, setFieldFilter] = useState("");
   const [snapshot, setSnapshot] = useState<any>(null);
+  const [citationStatus, setCitationStatus] = useState({ key: "", message: "" });
   useEffect(() => {
     if (s.mode !== "live") return;
     const abort = new AbortController();
@@ -1250,10 +1251,20 @@ function EvaluationResults({ run }: { run: Run }) {
                   key={document.id}
                   document={document}
                   field={active}
+                  onCitationStatus={(message) => setCitationStatus({ key: `${document.id}:${active?.key}`, message })}
+                  onCitationsResolved={(citations) => setDocs((current) => current.map((d) =>
+                    d.id !== document.id ? d : { ...d, fields: d.fields.map((f) =>
+                      f.key !== active?.key ? f : { ...f, citations, page: citations[0].page, area: citations[0].area }
+                    ) }
+                  ))}
                 />
                 <div className="source-footer">
                   {active?.area
                     ? `Highlighted: ${active.key} · page ${active.page || 1}`
+                    : citationStatus.key === `${document.id}:${active?.key}`
+                      ? citationStatus.message
+                    : active?.sourceExcerpt && document.type.includes("pdf")
+                      ? "Locating source excerpt…"
                     : "No source citation for the selected field"}
                 </div>
               </section>
