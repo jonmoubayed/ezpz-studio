@@ -50,6 +50,7 @@ def _add_usage(total: Dict[str, Any], usage: Dict[str, Any]) -> Dict[str, Any]:
 def _usage_entry(model: Any, usage: Dict[str, Any], config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     return {
         "model": getattr(model, "name", "unknown"),
+        "provider": (config or {}).get("provider"),
         "usage": dict(usage or {}),
         "pricing": dict((config or {}).get("pricing") or {}),
     }

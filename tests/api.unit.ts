@@ -112,3 +112,10 @@ assert.throws(() => configPayload({ ...tuned, model: "gpt-6-astra", modelSetting
 assert.match(modelSettingsError("anthropic", "claude-haiku-4-5", { thinking_budget: 4096, max_tokens: 4096 }), /smaller/);
 assert.equal(modelSettingsError("google", "gemini-2.5-flash", { thinking_budget: 0 }), "");
 console.log("PASS: processor model settings round trip, reset, provider changes, zero values, validation, and saved-version isolation.");
+
+assert.equal(normalizeRun({ id: "missing" }).cost, null);
+assert.equal(normalizeRun({ id: "free", metrics: { cost_usd: 0 } }).cost, 0);
+const timed = normalizeRun({ id: "timed", metrics: { average_latency_ms: 9758 },
+  started_at: "2026-09-08T03:42:23.389111Z", completed_at: "2026-09-08T03:52:40.099541Z" });
+assert.equal(timed.latency, 9.758);
+assert.ok(Math.abs(timed.duration! - 616.710) < 0.001);

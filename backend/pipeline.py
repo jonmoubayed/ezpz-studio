@@ -8,6 +8,7 @@ from copy import deepcopy
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional, Tuple
 
+from .costing import estimate_cost
 from .confidence import CONTRACT_VERSION, valid_confidence
 from .db import Database
 from .evaluation import aggregate_evaluations, score_extraction
@@ -618,17 +619,6 @@ class ExtractionService:
 
     @staticmethod
     def _cost(processor_version: Dict[str, Any], usage: Dict[str, Any], model_usage: Optional[List[Dict[str, Any]]] = None) -> float:
-        if model_usage:
-            total = 0.0
-            for item in model_usage:
-                pricing = item.get("pricing") or {}
-                item_usage = item.get("usage") or {}
-                total += (float(item_usage.get("input_tokens", 0)) * float(pricing.get("input_per_million", 0)) + float(item_usage.get("output_tokens", 0)) * float(pricing.get("output_per_million", 0))) / 1000000
-            return round(total, 8)
-        pricing = processor_version.get("model", {}).get("pricing") or {}
-        input_rate = float(pricing.get("input_per_million", 0))
-        output_rate = float(pricing.get("output_per_million", 0))
-        return round(
-            (float(usage.get("input_tokens", 0)) * input_rate + float(usage.get("output_tokens", 0)) * output_rate) / 1000000,
-            8,
-        )
+        # The database keeps a numeric value; API responses distinguish unknown
+        # pricing from a real zero using the saved usage and cost_status.
+        return estimate_cost(processor_version.get("model", {}), usage, model_usage) or 0.0

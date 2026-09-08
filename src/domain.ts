@@ -77,7 +77,8 @@ export type Run = {
   model: string;
   provider: string;
   score: number | null;
-  cost: number;
+  cost: number | null;
+  duration?: number | null;
   latency: number;
   documents: number;
   status: string;
