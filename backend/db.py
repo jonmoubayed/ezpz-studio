@@ -7,6 +7,7 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
+from .costing import run_cost_metrics
 from .models import new_id, utc_now
 
 
@@ -936,6 +937,7 @@ class Database:
         result["eval_group"] = result["eval_experiment"].get("eval_group") if result["eval_experiment"] else None
         result["dataset"] = self.get_dataset(row["dataset_id"]) if row["dataset_id"] else None
         result["extractions"] = self.list_extractions(run_id)
+        result["metrics"].update(run_cost_metrics((result["processor_version"] or {}).get("model", {}), result["extractions"]))
         result["evaluations"] = self.list_evaluations(run_id)
         result["review_decisions"] = self.list_review_decisions(run_id)
         return result
@@ -954,6 +956,10 @@ class Database:
             item["dataset"] = self.get_dataset(row["dataset_id"]) if row["dataset_id"] else None
             item["extraction_count"] = int(item.pop("extraction_count", 0) or 0)
             item["evaluation_count"] = int(item.pop("evaluation_count", 0) or 0)
+            cost_rows = self._all("SELECT cost_usd, usage_json, cache_hit FROM extractions WHERE run_id = ?", (item["id"],))
+            item["metrics"].update(run_cost_metrics((item["processor_version"] or {}).get("model", {}), [
+                {"cost_usd": e["cost_usd"], "usage": _json(e["usage_json"], {}), "cache_hit": bool(e["cache_hit"])} for e in cost_rows
+            ]))
             result.append(item)
         return result
 

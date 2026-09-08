@@ -19,6 +19,9 @@ import { useStudio } from "./store";
 import { downloadJson, pct, type Run, type Document } from "./domain";
 import * as api from "./api";
 import {
+  formatCost,
+  totalRunCost,
+  formatRunDuration,
   groupRuns,
   groupExperiments,
   configurationChanges,
@@ -335,8 +338,8 @@ export function Evaluations() {
               "Per document · latest execution",
             ],
             [
-              "Total cost",
-              `$${experiment.runs.reduce((sum, r) => sum + r.cost, 0).toFixed(3)}`,
+              "Est. total cost",
+              formatCost(totalRunCost(experiment.runs)),
               "Across this experiment’s runs",
             ],
           ]}
@@ -399,8 +402,8 @@ export function Evaluations() {
                   <th>Execution</th>
                   <th>Status</th>
                   <th>Accuracy</th>
-                  <th>Latency</th>
-                  <th>Cost</th>
+                  <th>Avg. latency / doc</th>
+                  <th>Est. total cost</th>
                   <th>Documents</th>
                 </tr>
               </thead>
@@ -434,7 +437,7 @@ export function Evaluations() {
                       <strong>{pct(r.score)}</strong>
                     </td>
                     <td>{r.latency.toFixed(1)}s</td>
-                    <td>${r.cost.toFixed(3)}</td>
+                    <td>{formatCost(r.cost)}</td>
                     <td>{r.documents}</td>
                   </tr>
                 ))}
@@ -506,8 +509,8 @@ export function Evaluations() {
                 "Best vs selected baseline",
               ],
               [
-                "Total cost",
-                `$${group.runs.reduce((sum, r) => sum + r.cost, 0).toFixed(3)}`,
+                "Est. total cost",
+                formatCost(totalRunCost(group.runs)),
                 "Across all runs in this group",
               ],
             ]}
@@ -892,8 +895,8 @@ function RunComparison({
       "Benchmark snapshot",
       (r) => r.benchmarkFingerprint?.slice(0, 12) || "Not recorded",
     ],
-    ["Latency", (r) => `${r.latency.toFixed(1)}s`],
-    ["Cost", (r) => `$${r.cost.toFixed(3)}`],
+    ["Avg. latency / doc", (r) => `${r.latency.toFixed(1)}s`],
+    ["Est. total cost", (r) => formatCost(r.cost)],
     ["Prompt", (r) => r.config?.prompt || "Not recorded"],
     ["Schema", (r) => r.config?.schema || "Not recorded"],
   ];
@@ -1137,12 +1140,19 @@ function EvaluationResults({ run }: { run: Run }) {
           </strong>
         </span>
         <span>
-          Latency <strong>{run.latency.toFixed(1)}s</strong>
+          Avg. latency / doc <strong>{run.latency.toFixed(1)}s</strong>
         </span>
         <span>
-          Cost <strong>${run.cost.toFixed(3)}</strong>
+          Est. total cost <strong>{formatCost(run.cost)}</strong>
+        </span>
+        <span title="Elapsed time from run start to completion, including scoring and overhead.">
+          Total run time <strong>{formatRunDuration(run.duration)}</strong>
         </span>
       </div>
+      <p className="eval-fixture-note">
+        Latency averages extraction time per completed document, including parsing and model calls.
+        Cost estimates cover all completed documents using token usage and model rates; provider discounts and parser fees are excluded.
+      </p>
       {s.mode === "demo" && (
         <p className="eval-fixture-note">
           Field examples are illustrative; run metrics are sample fixtures.

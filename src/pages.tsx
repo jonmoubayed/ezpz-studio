@@ -413,7 +413,7 @@ export function RunsTable({
             <th>Experiment</th>
             <th>Model</th>
             <th>Field accuracy</th>
-            <th>Latency</th>
+            <th>Avg. latency / doc</th>
             <th>Status</th>
             <th />
           </tr>

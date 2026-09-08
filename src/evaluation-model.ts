@@ -167,3 +167,18 @@ export function parseEvaluationPath(hash: string) {
     return {};
   }
 }
+
+export function formatCost(cost: number | null): string {
+  if (cost === null) return "Unavailable";
+  if (cost > 0 && cost < 0.0001) return "<$0.0001";
+  return `$${cost.toFixed(cost > 0 && cost < 0.01 ? 4 : 3)}`;
+}
+export function totalRunCost(runs: Run[]): number | null {
+  return runs.some((run) => run.cost === null)
+    ? null : runs.reduce((sum, run) => sum + (run.cost ?? 0), 0);
+}
+export function formatRunDuration(seconds: number | null | undefined): string {
+  if (seconds == null || !Number.isFinite(seconds)) return "—";
+  const rounded = Math.round(seconds);
+  return rounded < 60 ? `${rounded}s` : `${Math.floor(rounded / 60)}m ${rounded % 60}s`;
+}

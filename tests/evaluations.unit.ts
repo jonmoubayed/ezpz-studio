@@ -146,3 +146,14 @@ assert.deepEqual(
 console.log(
   "Evaluation hierarchy: repeated runs, empty experiments, group isolation, config changes, and deep links passed.",
 );
+
+const { formatCost, totalRunCost, formatRunDuration } = await import("../src/evaluation-model");
+assert.equal(formatCost(null), "Unavailable");
+assert.equal(formatCost(0), "$0.000");
+assert.equal(formatCost(0.00001), "<$0.0001");
+assert.equal(formatCost(0.0004), "$0.0004");
+assert.equal(formatCost(0.2977056), "$0.298");
+assert.equal(totalRunCost([{ cost: 0.1 }, { cost: null }] as any), null);
+assert.equal(totalRunCost([{ cost: 0.1 }, { cost: 0.2 }] as any)?.toFixed(1), "0.3");
+assert.equal(formatRunDuration(616.71), "10m 17s");
+assert.equal(formatRunDuration(null), "—");

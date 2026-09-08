@@ -83,7 +83,10 @@ export function normalizeRun(r: any): Run {
     model: r.processor_version?.model?.name || "Unknown",
     provider: r.processor_version?.model?.provider || "local",
     score: r.metrics?.field_accuracy ?? null,
-    cost: r.metrics?.cost_usd ?? 0,
+    cost: r.metrics?.cost_usd ?? null,
+    duration: r.started_at && r.completed_at
+      ? Math.max(0, (Date.parse(r.completed_at) - Date.parse(r.started_at)) / 1000)
+      : null,
     latency: (r.metrics?.average_latency_ms ?? 0) / 1000,
     documents:
       r.metrics?.documents ?? r.extraction_count ?? r.extractions?.length ?? 0,
