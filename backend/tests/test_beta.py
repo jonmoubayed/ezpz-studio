@@ -37,7 +37,7 @@ class BetaTests(unittest.TestCase):
         (dist / 'index.html').write_text('<h1>Public studio</h1>')
         (dist / 'escape.txt').symlink_to(self.root / 'private.txt')
         (dist / '.hidden').write_text('hidden')
-        server = make_server(self.root, port=0)
+        server = make_server(self.root, port=0, static_root=dist)
         worker = threading.Thread(target=server.serve_forever, daemon=True)
         worker.start()
         base = 'http://127.0.0.1:{}'.format(server.server_address[1])

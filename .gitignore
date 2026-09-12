@@ -21,3 +21,6 @@ build/
 
 # Harness browser captures
 .screenshots/
+
+# Generated frontend assets staged for Python releases
+backend/studio/

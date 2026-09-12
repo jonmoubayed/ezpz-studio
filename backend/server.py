@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, unquote, urlparse
 
+from .paths import bundled_studio_root, default_runtime_root
 from .config import Settings
 from .collaboration import AgentJobs, CollaborationHandler, RevisionConflict
 from .adapters import get_adapter_catalog
@@ -55,7 +56,7 @@ class Runtime:
 
 
 def create_runtime(root: Optional[Path] = None) -> Runtime:
-    return Runtime(root or Path(__file__).resolve().parents[1])
+    return Runtime(root or default_runtime_root())
 
 
 class EzpzHandler(CollaborationHandler, BaseHTTPRequestHandler):
@@ -929,7 +930,7 @@ class EzpzHandler(CollaborationHandler, BaseHTTPRequestHandler):
         return [unquote(part) for part in clean.split("/") if part]
 
 
-def make_server(root: Optional[Path] = None, host: str = "127.0.0.1", port: int = 4173) -> ThreadingHTTPServer:
+def make_server(root: Optional[Path] = None, host: str = "127.0.0.1", port: int = 4173, static_root: Optional[Path] = None) -> ThreadingHTTPServer:
     runtime = create_runtime(root)
 
     class Handler(EzpzHandler):
@@ -941,9 +942,14 @@ def make_server(root: Optional[Path] = None, host: str = "127.0.0.1", port: int 
             return super().server_close()
 
     Handler.runtime = runtime
-    built_frontend = runtime.root / "dist"
-    Handler.static_root = Path(os.environ.get("EZPZ_STATIC_ROOT", str(built_frontend))).resolve()
-    server = RuntimeHTTPServer((host, port), Handler)
+    bundled = bundled_studio_root()
+    built_frontend = bundled if (bundled / "index.html").is_file() else Path(__file__).resolve().parents[1] / "dist"
+    Handler.static_root = static_root or Path(os.environ.get("EZPZ_STATIC_ROOT", str(built_frontend))).resolve()
+    try:
+        server = RuntimeHTTPServer((host, port), Handler)
+    except OSError:
+        runtime.shutdown()
+        raise
     try:
         # CLI readers must not change active jobs. Recover only after the API
         # successfully binds, so a failed duplicate startup cannot stop a run.
@@ -961,7 +967,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run the local ezpz evaluation workbench.")
     parser.add_argument("--host", default=os.environ.get("EZPZ_HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("EZPZ_PORT", "4173")))
-    parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument("--root", type=Path, default=default_runtime_root())
     args = parser.parse_args()
     server = make_server(args.root, args.host, args.port)
     print("ezpz running at http://{}:{}/".format(args.host, args.port))

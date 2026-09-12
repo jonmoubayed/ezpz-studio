@@ -40,6 +40,17 @@ ezpz uses open-source Extend UI components for document viewing and schema editi
 
 ## Quick start
 
+### Install a Python wheel
+
+After merging into the default branch, **Build and verify Studio** builds a wheel
+containing the current frontend and backend. Download `ezpz-wheel-<commit>` from
+the successful Actions run, extract it, and use the `uvx --from ... ezpz studio`
+command in the run summary. The installed app requires neither Node.js nor Docker
+and keeps your workspace outside the package installation.
+
+See [wheel builds and installation](docs/python-wheel.md) for local builds,
+downloads, workspace paths, and verification.
+
 ### Explore the demo
 
 From this repository, with **Node.js 22.12+** and npm installed:

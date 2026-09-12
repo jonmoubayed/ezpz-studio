@@ -1,6 +1,7 @@
-name: Beta release checks
+name: Build and verify Studio
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
   workflow_call:
@@ -25,6 +26,8 @@ jobs:
           python-version: '3.12'
       - run: npm ci
       - run: python -m pip install -r requirements.lock
+      - name: Stage the live frontend for Python packaging
+        run: python scripts/build-package.py --skip-install --frontend-only
       - run: python -m pip install ".[mcp]"
       - run: python -m unittest discover -s backend/tests
       - run: npm test
@@ -49,3 +52,137 @@ jobs:
         with:
           name: browser-failures-${{ matrix.runner }}
           path: test-results/
+
+  package:
+    name: Build wheel and source archive
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install build dependencies
+        run: python -m pip install build -r requirements.lock
+      - name: Identify this commit in the wheel version
+        run: |
+          python - <<'PY'
+          import os, re, tomllib
+          from pathlib import Path
+
+          path = Path("pyproject.toml")
+          source = path.read_text()
+          base = tomllib.loads(source)["project"]["version"].split("+")[0]
+          version = base + "+g" + os.environ["GITHUB_SHA"][:12]
+          source, count = re.subn(r'^version = "[^"]+"$', f'version = "{version}"', source, count=1, flags=re.MULTILINE)
+          if count != 1:
+              raise SystemExit("Could not set the CI package version")
+          path.write_text(source)
+          print("Building", version)
+          PY
+      - name: Build packaged frontend, wheel, and source archive
+        run: python scripts/build-package.py
+      - name: Test wheel startup checks
+        run: python -m unittest discover -s scripts/tests -p 'test_*.py'
+      - name: Test packaged frontend
+        run: npm test
+      - name: Record build provenance and checksums
+        run: |
+          python - <<'PY'
+          import hashlib, json, os, tomllib
+          from pathlib import Path
+
+          release = Path("release")
+          metadata = {
+              "version": tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"],
+              "commit": os.environ["GITHUB_SHA"],
+              "ref": os.environ["GITHUB_REF"],
+              "run_url": f'{os.environ["GITHUB_SERVER_URL"]}/{os.environ["GITHUB_REPOSITORY"]}/actions/runs/{os.environ["GITHUB_RUN_ID"]}',
+              "frontend_source": "src/",
+          }
+          (release / "BUILD.json").write_text(json.dumps(metadata, indent=2) + "\n")
+          files = sorted([*release.glob("*.whl"), *release.glob("*.tar.gz"), release / "BUILD.json"])
+          (release / "SHA256SUMS").write_text("".join(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n" for path in files))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: studio-candidate-${{ github.sha }}
+          overwrite: true
+          path: |
+            release/*.whl
+            release/*.tar.gz
+            release/BUILD.json
+            release/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+  installed-studio:
+    needs: package
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.12", "3.14"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: studio-candidate-${{ github.sha }}
+          path: release
+      - name: Install outside checkout, evaluate, and reinstall
+        shell: bash
+        run: python scripts/test-install.py release/*.whl
+
+  verified-wheel:
+    name: Download verified wheel
+    needs: [verify, package, installed-studio]
+    if: >-
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: studio-candidate-${{ github.sha }}
+          path: release
+      - name: Verify the downloaded files
+        working-directory: release
+        run: sha256sum --check SHA256SUMS
+      - name: Upload verified download
+        id: download
+        uses: actions/upload-artifact@v4
+        with:
+          name: ezpz-wheel-${{ github.sha }}
+          overwrite: true
+          path: release/*
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0
+      - name: Add download to the run summary
+        env:
+          ARTIFACT_URL: ${{ steps.download.outputs.artifact-url }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+
+          build = json.loads(Path("release/BUILD.json").read_text())
+          wheel = next(Path("release").glob("*.whl")).name
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write(f'## Studio wheel ready\n\n[Download verified build]({os.environ["ARTIFACT_URL"]})\n\n')
+              summary.write(f'Version: `{build["version"]}` · Commit: `{build["commit"]}`\n\n')
+              summary.write("Frontend/backend checks and clean-install tests on Linux, macOS, and Windows passed.\n\n")
+              summary.write(f'Extract the download, then run:\n\n```sh\nuvx --from "./{wheel}" ezpz studio\n```\n')
+          PY

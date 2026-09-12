@@ -23,4 +23,5 @@
 **/__pycache__
 **/*.pyc
 backend/tests
+backend/studio
 public/vendor/*.wasm
