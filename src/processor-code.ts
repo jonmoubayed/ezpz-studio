@@ -23,7 +23,7 @@ export function generateProcessorCode(config: Config) {
   }
   const providers = ["local", "openai", "anthropic", "google", "gemini", "ollama", "openai-compatible"];
   if (!providers.includes(config.provider)) throw new Error(`Unsupported provider: ${config.provider}`);
-  if (!["native", "docling", "llama-parse"].includes(config.parser)) throw new Error(`Unsupported parser: ${config.parser}`);
+  if (!["none", "native", "docling", "llama-parse"].includes(config.parser)) throw new Error(`Unsupported parser: ${config.parser}`);
   if (!config.model.trim()) throw new Error("Enter a model ID before copying code.");
   if (config.harness && config.harness.name !== "direct" && config.harness.name !== "parse_extract") {
     const error = harnessError(config.harness);
@@ -79,6 +79,31 @@ print(json.dumps(result.output, indent=2))
     }
     if (config.provider === "ollama") endpoint = endpoint.replace(/\/v1$/, "");
     else if (!url.pathname || url.pathname === "/") endpoint += "/v1";
+  }
+
+  if (config.parser === "none") {
+    const directSetup = [
+      "Run from the ezpz repository root after installing requirements.txt.",
+      env.length ? `Set environment variables: ${env.join(", ")}.` : "Configure the selected model endpoint as needed.",
+      "PDF/image input requires a compatible OpenAI, Anthropic, or Gemini model.",
+      "Run: python extract.py /path/to/document.pdf",
+    ];
+    const model = { provider: config.provider === "google" ? "gemini" : config.provider, name: config.model,
+      ...(["ollama", "openai-compatible"].includes(config.provider) ? {base_url: config.provider === "ollama" ? `${endpoint}/v1` : endpoint} : {}) };
+    return { setup: directSetup, code: [
+      ["# Extract directly from the original document; source boxes are model estimates.", ...directSetup.map(line => `# ${line}`)].join("\n"),
+      "import json\nimport mimetypes\nimport sys\nfrom pathlib import Path\nfrom backend.grounding import original_document_ir\nfrom backend.model import create_model_adapter",
+      `SCHEMA = ${pyLiteral(schema)}\nINSTRUCTIONS = ${pyLiteral(config.prompt)}\nMODEL = ${pyLiteral(config.model)}`,
+      `source = Path(sys.argv[1])
+document_ir = original_document_ir(
+    {"id": "source", "filename": source.name,
+     "mime_type": mimetypes.guess_type(source.name)[0] or "application/octet-stream"}, source.read_bytes(),
+)
+result = create_model_adapter(${pyLiteral(model)}).run(
+    document_ir, SCHEMA, ${pyLiteral({...config.modelSettings, extraction: config.prompt})},
+).output
+print(json.dumps(result, ensure_ascii=False, indent=2))`,
+    ].join("\n\n") };
   }
 
   const setup = [

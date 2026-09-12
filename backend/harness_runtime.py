@@ -14,6 +14,8 @@ from pathlib import Path
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.func import entrypoint, task
 
+from .adapters import normalize_parser_name
+from .grounding import original_document_ir
 from .harness import HarnessResult, run_harness, _add_usage
 from .harness_spec import assess, get, leaves, merge_scoped, project, put, validate_spec, vote, unwrap, equal
 from .models import DocumentIR, DocumentPage, DocumentBlock, ModelResult
@@ -112,6 +114,11 @@ def execute_harness(document, data, version, model_factory, directory, execution
     """One immutable document execution. Reinvoking resumes the same task sequence."""
     spec = version.get("harness") or {"name": "direct"}
     validate_spec(spec, version.get("schema", {}))
+    parser_config = version.get("parser", {})
+    no_parser = normalize_parser_name(parser_config.get("name") or parser_config.get("provider")) == "none"
+    input_mode = spec.get("input", "document" if no_parser else "parsed")
+    if input_mode == "document" and str(spec.get("name", "")).strip().lower() == "page_extract":
+        raise ValueError("Page extraction requires parsed pages. Use the direct harness with original document input.")
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     artifacts = Artifacts(directory / "artifacts")
@@ -439,8 +446,11 @@ def execute_harness(document, data, version, model_factory, directory, execution
 
         @entrypoint(checkpointer=saver)
         def workflow(_identity):
-            context = {"input": spec.get("input", "parsed"), "output": {},
-                       "ir": DocumentIR(source["id"], {"name": "none", "status": "unavailable", "warnings": []}, source, []).to_dict()}
+            initial_ir = original_document_ir(source, data) if input_mode == "document" else DocumentIR(
+                source["id"], {"name": "none", "status": "unavailable", "warnings": []}, source, [])
+            # Reattach source bytes only at the provider call, never in checkpoints or results.
+            initial_ir.metadata.pop("source_input", None)
+            context = {"input": input_mode, "output": {}, "ir": initial_ir.to_dict()}
             if context["input"] == "parsed":
                 context = evaluate({"id": "input-parse", "kind": "parse"}, context, "input-parse")
             if spec.get("name") == "workflow":

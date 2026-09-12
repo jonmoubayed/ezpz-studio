@@ -7,7 +7,7 @@
     "dev": "vite --host 127.0.0.1 --port 5180",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1 --port 5180",
-    "test": "tsx tests/api.unit.ts && tsx tests/harness.unit.ts && tsx tests/schema.unit.ts && tsx tests/evaluations.unit.ts && tsx tests/results.unit.ts && tsx tests/pdf-excerpt.unit.ts && tsx tests/confidence.unit.ts && tsx tests/structured-value.unit.tsx && npm run test:processor-code",
+    "test": "tsx tests/api.unit.ts && tsx tests/harness.unit.ts && tsx tests/schema.unit.ts && tsx tests/evaluations.unit.ts && tsx tests/results.unit.ts && tsx tests/extraction-output.unit.tsx && tsx tests/pdf-excerpt.unit.ts && tsx tests/confidence.unit.ts && tsx tests/structured-value.unit.tsx && npm run test:processor-code",
     "postinstall": "node scripts/copy-vendor.mjs",
     "test:integration": "node scripts/test-api.mjs",
     "start": "node scripts/start.mjs",

@@ -1,8 +1,11 @@
 """Direct visual evidence contract and validation; no OCR or text matching."""
+import base64
 import math
 from typing import Any
 
 from .confidence import mark_model_confidence
+from .models import DocumentIR
+from .storage import count_pdf_pages
 
 GROUNDING_INSTRUCTIONS = (
     "For every extraction leaf also return an evidence array of {page, bbox, text}. "
@@ -70,3 +73,11 @@ def model_output(output, schema, document_ir):
                         evidence.append(region)
         return {**value, "evidence": evidence}
     return visit(output, schema)
+
+
+def original_document_ir(document, data):
+    """Attach the source bytes without OCR, layout parsing, or text extraction."""
+    metadata = {key: document[key] for key in ("filename", "mime_type")}
+    metadata["page_count"] = document.get("page_count") or (count_pdf_pages(data) if document["mime_type"] == "application/pdf" else 1)
+    metadata["source_input"] = {**metadata, "data": base64.b64encode(data).decode("ascii")}
+    return DocumentIR(document["id"], {"name": "none", "version": "1", "status": "unavailable", "warnings": []}, metadata, [])

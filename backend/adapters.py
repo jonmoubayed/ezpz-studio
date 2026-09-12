@@ -80,6 +80,13 @@ LLM_ADAPTERS: Dict[str, Dict[str, Any]] = {
 
 
 PARSER_ADAPTERS: Dict[str, Dict[str, Any]] = {
+    "none": {
+        "label": "Original document · no parser",
+        "kind": "direct",
+        "credential_env": None,
+        "models": [],
+        "description": "Send the original PDF or image to a compatible model and request model-estimated source boxes.",
+    },
     "native": {
         "label": "Native text",
         "kind": "local",

@@ -9,7 +9,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from backend.confidence import response_schema
-from backend.grounding import model_output
+from backend.grounding import model_output, original_document_ir
 from backend.model import AnthropicModel, GeminiModel, OpenAICompatibleModel
 from backend.models import DocumentIR
 from backend.pipeline import canonicalize
@@ -95,16 +95,34 @@ class DirectGroundingTests(unittest.TestCase):
         image = model_output(OUTPUT, SCHEMA, source_ir("image/png"))
         self.assertEqual(len(image["items"]["evidence"]), 1)
 
+    def test_original_input_preparation_and_unsupported_adapter(self):
+        document = {"id": "doc", "filename": "source.png", "mime_type": "image/png"}
+        ir = original_document_ir(document, PNG)
+        self.assertEqual(ir.metadata["page_count"], 1)
+        self.assertEqual(base64.b64decode(ir.metadata["source_input"]["data"]), PNG)
+        with patch("urllib.request.urlopen") as request:
+            with self.assertRaisesRegex(ValueError, "does not support direct"):
+                OpenAICompatibleModel(provider="ollama", requires_api_key=False).run(ir, SCHEMA, {})
+            request.assert_not_called()
+
     def test_no_parser_execution_persists_boxes_and_reuses_cache(self):
+        self.check_direct_execution({"name": "none"}, {"name": "direct"})
+
+    def test_document_workflow_persists_boxes_and_reuses_cache(self):
+        self.check_direct_execution({"name": "llama-parse"}, {
+            "name": "workflow", "version": 1, "input": "document",
+            "flow": {"id": "extract", "kind": "extract"},
+        })
+
+    def check_direct_execution(self, parser, harness):
         with TemporaryDirectory() as directory, patch.dict(os.environ, {"EZPZ_SEED_DEMO": "false", "OPENAI_API_KEY": "test"}):
             runtime = create_runtime(Path(directory))
             db = runtime.database
             doc = runtime.ingestor.ingest("source.png", PNG, "image/png")["document"]
             db.upsert_processor_draft("invoice-extractor", {
-                "schema": SCHEMA, "parser": {"name": "llama-parse"},
+                "schema": SCHEMA, "parser": parser,
                 "model": {"provider": "openai", "name": "gpt-4.1"},
-                "harness": {"name": "workflow", "version": 1, "input": "document",
-                            "flow": {"id": "extract", "kind": "extract"}},
+                "harness": harness,
             })
             db.publish_processor_draft("invoice-extractor")
             response = {"choices": [{"message": {"content": json.dumps(OUTPUT)}}]}
@@ -113,11 +131,17 @@ class DirectGroundingTests(unittest.TestCase):
                 saved = db.get_extraction(extracted["id"])
                 self.assertEqual(saved["parser_ir"]["parser"]["name"], "none")
                 self.assertEqual(saved["parser_ir"]["pages"], [])
+                self.assertNotIn("source_input", saved["parser_ir"]["metadata"])
                 self.assertEqual(saved["result"]["fields"]["total"]["evidence"][0]["bbox"], BOX["bbox"])
                 self.assertEqual(saved["fields"]["total"]["evidence"][0]["metadata"]["bbox_source"], "model")
                 cached = runtime.extractions.extract_document(doc["id"])
                 self.assertTrue(cached["cache_hit"])
                 self.assertEqual(cached["result"]["fields"]["total"]["evidence"], saved["fields"]["total"]["evidence"])
+                self.assertEqual(request.call_count, 1)
+                with self.assertRaisesRegex(ValueError, "requires parsed pages"):
+                    runtime.extractions.extract_document(doc["id"], persist=False, processor_version_override={
+                        "id": "preview", "parser": {"name": "none"}, "harness": {"name": "PAGE_EXTRACT"}, "schema": SCHEMA,
+                    })
                 self.assertEqual(request.call_count, 1)
 
 

@@ -269,7 +269,7 @@ try {
     .getByLabel("Extraction instructions")
     .fill("Extract exact invoice number and total. Retain decimal precision.");
   await page
-    .getByRole("button", { name: "Run this candidate once", exact: true })
+    .getByRole("button", { name: "Run candidate on benchmark", exact: true })
     .click();
   await expect(
     page.getByRole("heading", { name: "Evaluation groups", exact: true }),

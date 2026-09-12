@@ -580,6 +580,7 @@ export function ConfigForm({
             s.mode === "live" && s.adapters
               ? s.adapters.parsers.map((p) => ({ value: p.id, label: p.label }))
               : [
+                  { value: "none", label: "Original document · no parser" },
                   { value: "native", label: "Native text · local" },
                   { value: "docling", label: "Docling · local" },
                   { value: "llama-parse", label: "LlamaParse" },
@@ -587,6 +588,7 @@ export function ConfigForm({
           }
         />
       </label>
+      {config.parser === "none" && <p className="form-hint">PDF and image input requires a compatible hosted model. Source boxes are model estimates and may be approximate. Fields without a locatable source have no box.</p>}
       <label>
         Extraction instructions
         <textarea
