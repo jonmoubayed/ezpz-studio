@@ -24,8 +24,10 @@ class BetaTests(unittest.TestCase):
         self.root = Path(self.directory.name)
 
     def tearDown(self):
-        self.directory.cleanup()
-        self.env.stop()
+        try:
+            self.directory.cleanup()
+        finally:
+            self.env.stop()
 
     def test_static_files_origins_and_multipart(self):
         (self.root / '.env').write_text('SYNTHETIC_MARKER=not-a-secret\n')
@@ -122,6 +124,10 @@ class BetaTests(unittest.TestCase):
             self.assertEqual(saved['status'], 'cancelled')
             self.assertEqual(saved['metrics']['completed'], 1)
             self.assertEqual(saved['metrics']['documents'], 2)
+            # Terminal status is persisted before the worker releases its lock.
+            # Wait for that cleanup before removing the temporary database.
+            self.assertTrue(runtime.extractions.background_slots.acquire(timeout=5))
+            runtime.extractions.background_slots.release()
 
     def test_restart_marks_unfinished_runs_and_preserves_completed_records(self):
         runtime = create_runtime(self.root)

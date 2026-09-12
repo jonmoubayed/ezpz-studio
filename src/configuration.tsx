@@ -22,6 +22,9 @@ import {
 } from "./components/extend/schema-builder";
 import { readSchema, writeSchema, type SchemaDocument } from "./schema-adapter";
 import { ProcessorCodePanel } from "./processor-code-panel";
+import { HarnessEditor } from "./harness-editor";
+import { HarnessTrace } from "./harness-trace";
+import { harnessError } from "./harness";
 import { ConfigForm } from "./pages";
 import { useStudio } from "./store";
 import { Badge, Button, Busy, Empty, Heading } from "./ui";
@@ -101,7 +104,7 @@ export function Configuration() {
     }
   });
   const [jsonDirty, setJsonDirty] = useState(false);
-  const valid = !error && !jsonDirty;
+  const valid = !error && !jsonDirty && !harnessError(s.config.harness);
   const update = (next: SchemaBuilderSchema) => {
     setSchema(next);
     try {
@@ -202,7 +205,7 @@ export function Configuration() {
           );
         }}
       />
-      <div className="workbench-layout processor-workspace">
+      <div className={`workbench-layout processor-workspace${pane === "harness" ? " harness-workspace" : ""}`}>
         <WorkbenchSource
           document={source}
           field={field}
@@ -237,11 +240,15 @@ export function Configuration() {
                 Results{" "}
                 {preview && <span>{fieldTree(preview.document.fields).length}</span>}
               </TabsTrigger>
+              <TabsTrigger value="harness">Harness</TabsTrigger>
               <TabsTrigger value="code">
                 <Code2 size={14} /> Code
               </TabsTrigger>
             </TabsList>
           </div>
+          <TabsContent value="harness" className="processor-config-content">
+            <HarnessEditor config={s.config} onChange={s.updateConfig} live={s.mode === "live"} />
+          </TabsContent>
           <TabsContent
             value="configure"
             forceMount
@@ -293,7 +300,8 @@ export function Configuration() {
                               "v" +
                               v.version +
                               " · " +
-                              new Date(v.date).toLocaleDateString(),
+                              new Date(v.date).toLocaleDateString() +
+                              (v.author?.startsWith("mcp:") ? ` · ${v.author} · ${v.status === "draft" ? "candidate" : "published"}` : ""),
                           })),
                         ]}
                       />
@@ -543,7 +551,9 @@ function ProcessorPreview({
           <TabsTrigger value="fields">Fields</TabsTrigger>
           <TabsTrigger value="json">JSON</TabsTrigger>
           <TabsTrigger value="expected">Expected</TabsTrigger>
+          <TabsTrigger value="steps">Execution steps</TabsTrigger>
         </TabsList>
+        <TabsContent value="steps"><HarnessTrace steps={preview.document.harnessSteps} /></TabsContent>
         <TabsContent value="fields">
           <div className="processor-preview-fields">
             <ExtractionFields fields={resultDocument.fields} renderField={(f, name) => (

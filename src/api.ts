@@ -1,5 +1,6 @@
 import { readModelSettings, settingsPrompt } from "./model-settings.ts";
 import { confidenceFromResponse } from "./confidence";
+import { harnessError } from "./harness";
 import { expectedValue, extractionCitations } from "./result-model";
 import type {
   Config,
@@ -48,13 +49,13 @@ export const configPayload = (c: Config) => ({
       ? { base_url: c.baseUrl }
       : {}),
   },
-  harness: { name: "direct", version: "1" },
+  harness: (() => { const error = harnessError(c.harness); if (error) throw new Error(error); return c.harness || { name: "direct", version: "1" }; })(),
 });
 // Backend response shapes are normalized here; views never import the original frontend.
 export function normalizeRun(r: any): Run {
   return {
     id: r.id,
-    benchmarkFingerprint: r.metadata?.benchmark_snapshot?.fingerprint,
+    benchmarkFingerprint: r.metadata?.benchmark_snapshot?.fingerprint || r.metadata?.agent_benchmark_fingerprint,
     cacheHits: r.metrics?.cache_hits,
     completedDocuments: r.metrics?.completed,
     failedDocuments: r.metrics?.failed,
@@ -69,6 +70,7 @@ export function normalizeRun(r: any): Run {
           provider: r.processor_version.model?.provider || "local",
           model: r.processor_version.model?.name || "",
           parser: r.processor_version.parser?.name || "",
+          harness: r.processor_version.harness,
           prompt: r.processor_version.prompt?.extraction || "",
           modelSettings: readModelSettings(r.processor_version.prompt),
           schema: JSON.stringify(r.processor_version.schema ?? {}, null, 2),
@@ -201,8 +203,12 @@ export async function inspectDocument(
     ...d,
     fields: extractionFields(data.extraction, data.ground_truth),
     groundTruth: data.ground_truth?.value || {},
+    groundTruthRevision: data.ground_truth?.revision || 0,
+    annotationStatus: data.ground_truth?.annotation_status,
+    annotationAuthor: data.ground_truth?.author,
     runId: data.extraction?.run_id,
     warnings: data.extraction?.warnings || [],
+    harnessSteps: data.extraction?.result?.provenance?.harness_steps,
   };
 }
 export async function previewDocument(
@@ -311,6 +317,7 @@ export async function createDataset(name: string, documentIds: string[]) {
 
 export function versionConfig(v: any): Config {
   return {
+    harness: v.harness,
     provider: v.model?.provider || "local",
     model: v.model?.name || "",
     parser: v.parser?.name || "native",
@@ -331,6 +338,8 @@ export function normalizeProcessor(p: any): import("./domain").Processor {
       version: v.version,
       config: versionConfig(v),
       date: v.created_at,
+      author: v.author,
+      status: v.status,
     }))
     .sort((a: any, b: any) => b.version - a.version);
   return {
@@ -348,22 +357,25 @@ export async function saveProcessorVersion(
   id: string,
   config: Config,
   details?: { name: string; description: string },
+  expectedVersion?: number,
 ) {
+  const { processor } = await request(`/processors/${encodeURIComponent(id)}`);
+  const latest = processor.versions[0];
+  const expected = expectedVersion ?? latest.version;
+  if (expected !== latest.version)
+    throw new Error("Processor changed in another session. Select its latest version and reapply your edits before saving.");
+  const { version } = await post(`/processors/${encodeURIComponent(id)}/versions`, {
+    config: mergeEditableConfig(latest, config),
+    expected_version: expected,
+    author: "local",
+    status: "published",
+  });
   if (details)
     await request(`/processors/${encodeURIComponent(id)}`, {
       method: "PATCH",
       body: JSON.stringify(details),
     });
-  const { draft } = await request(
-    `/processors/${encodeURIComponent(id)}/draft`,
-  );
-  const merged = mergeEditableConfig(draft, config);
-  await request(`/processors/${encodeURIComponent(id)}/draft`, {
-    method: "PATCH",
-    body: JSON.stringify({ config: merged }),
-  });
-  return (await post(`/processors/${encodeURIComponent(id)}/draft/publish`, {}))
-    .version;
+  return version;
 }
 
 // Merge the controls exposed in Studio without discarding backend-only options.
@@ -371,7 +383,7 @@ export function mergeEditableConfig(base: any, config: Config) {
   const editable = configPayload(config);
   const merged = {
     ...editable,
-    harness: base?.harness || editable.harness,
+    harness: config.harness ?? base?.harness ?? editable.harness,
     ...(base?.normalization ? { normalization: base.normalization } : {}),
     parser: {
       ...(base?.parser?.name === config.parser ? base.parser : {}),
@@ -391,10 +403,13 @@ export function mergeEditableConfig(base: any, config: Config) {
 export async function saveGroundTruth(
   documentId: string,
   value: Record<string, import("./domain").JsonValue>,
+  expectedRevision?: number,
 ) {
+  const revision = expectedRevision ?? (await request(`/documents/${encodeURIComponent(documentId)}/ground-truth`)).ground_truth?.revision ?? 0;
   return post(`/documents/${encodeURIComponent(documentId)}/ground-truth`, {
     value,
     annotation_status: "complete",
+    expected_revision: revision,
     author: "local",
   });
 }

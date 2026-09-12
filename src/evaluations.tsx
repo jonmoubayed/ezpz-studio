@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { Badge, Button, Busy, Empty, Heading, Modal } from "./ui";
 import { RunModal, ModelMark } from "./pages";
+import { HarnessTrace } from "./harness-trace";
 import { SourceViewer } from "./workbench";
 import { useStudio } from "./store";
 import { downloadJson, pct, type Run, type Document } from "./domain";
@@ -987,6 +988,17 @@ function EvaluationResults({ run }: { run: Run }) {
   const [search, setSearch] = useState("");
   const [fieldFilter, setFieldFilter] = useState("");
   const [snapshot, setSnapshot] = useState<any>(null);
+  const [savedSteps, setSavedSteps] = useState<any[]>([]);
+  useEffect(() => {
+    if (s.mode !== "live") return;
+    const abort = new AbortController();
+    const load = () => api.request(`/runs/${encodeURIComponent(run.id)}/steps`, { signal: abort.signal })
+      .then(data => { if (!abort.signal.aborted) setSavedSteps(data.documents); })
+      .catch(() => {});
+    void load();
+    const timer = ["running", "pausing", "cancelling"].includes(run.status.toLowerCase()) ? window.setInterval(load, 3000) : undefined;
+    return () => { abort.abort(); if (timer) window.clearInterval(timer); };
+  }, [run.id, run.status, s.mode]);
   const [citationStatus, setCitationStatus] = useState({ key: "", message: "" });
   useEffect(() => {
     if (s.mode !== "live") return;
@@ -1064,29 +1076,27 @@ function EvaluationResults({ run }: { run: Run }) {
           </>
         }
       />
-      {["running", "cancelling"].includes(run.status.toLowerCase()) && (
+      {["running", "pausing", "cancelling", "paused", "interrupted"].includes(run.status.toLowerCase()) && (
         <div className="evaluation-run-status" role="status">
-          <Busy
-            label={`${run.completedDocuments || 0} completed · ${run.failedDocuments || 0} failed / ${run.documents} documents`}
-          />
-          <Button
-            disabled={run.status === "cancelling"}
+          {["running", "pausing", "cancelling"].includes(run.status.toLowerCase())
+            ? <Busy label={`${run.completedDocuments || 0} completed · ${run.failedDocuments || 0} failed / ${run.documents} documents`} />
+            : <span>{run.status === "paused" ? "Paused" : "Interrupted"} · {run.completedDocuments || 0} of {run.documents} documents completed. Saved steps are kept.</span>}
+          {(run.status === "running" || ["paused", "interrupted"].includes(run.status)) && <Button
             onClick={async () => {
               try {
-                await api.request(`/runs/${encodeURIComponent(run.id)}/cancel`, {
-                  method: "POST",
-                });
+                await api.request(`/runs/${encodeURIComponent(run.id)}/${run.status === "running" ? "pause" : "resume"}`, { method: "POST" });
                 await s.refresh();
-              } catch (error) {
-                s.notifyError(error);
-              }
-            }}
-          >
-            {" "}
-            {run.status === "cancelling"
-              ? "Stopping after current document…"
-              : "Cancel run"}
-          </Button>
+              } catch (error) { s.notifyError(error); }
+            }}>
+            {run.status === "running" ? "Pause" : "Resume evaluation"}
+          </Button>}
+          {run.status === "pausing" && <span>Saving active calls before pausing…</span>}
+          <Button disabled={run.status === "cancelling"} onClick={async () => {
+            try {
+              await api.request(`/runs/${encodeURIComponent(run.id)}/cancel`, { method: "POST" });
+              await s.refresh();
+            } catch (error) { s.notifyError(error); }
+          }}>{run.status === "cancelling" ? "Cancelling…" : "Cancel run"}</Button>
         </div>
       )}
       {(run.error ||
@@ -1098,9 +1108,11 @@ function EvaluationResults({ run }: { run: Run }) {
         ].includes(run.status.toLowerCase())) && (
         <p className="form-error" role="alert">
           {run.error ||
-            `Run ${run.status.replaceAll("_", " ")}. ${run.failedDocuments || 0} documents failed. Open the experiment to run it again.`}
+            `Run ${run.status.replaceAll("_", " ")}. ${run.failedDocuments || 0} documents failed.${run.status === "interrupted" ? " Resume to continue saved progress." : ""}`}
         </p>
       )}
+      {!!savedSteps.length && ["running", "pausing", "paused", "interrupted"].includes(run.status.toLowerCase()) && <details><summary>Saved execution progress</summary>{savedSteps.map(saved => <section key={saved.document_id}><h3>{saved.name}</h3><HarnessTrace steps={saved.steps} /></section>)}</details>}
+      {!!document?.harnessSteps?.length && <details><summary>Execution trace · {document.name}</summary><HarnessTrace steps={document.harnessSteps} /></details>}
       {!!snapshot?.metrics?.failures?.length && (
         <details className="experiment-config">
           <summary>

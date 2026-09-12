@@ -30,12 +30,14 @@ import {
 } from "./domain";
 import * as api from "./api";
 import {
+  evaluationPath,
   evaluationDocuments,
   demoEvaluationDocuments,
 } from "./evaluation-model";
 export type ExpectedSaveResult = {
   ok: boolean;
   groundTruthSaved: boolean;
+  groundTruthRevision?: number;
   dataset?: Dataset;
   alreadyMember?: boolean;
   error?: string;
@@ -125,12 +127,15 @@ function useStore() {
     initialDemo ? readStored("ezpz-redesign-active-processor", "") : "",
   );
   const [configRevision, setConfigRevision] = useState(0);
+  const [configBaseVersion, setConfigBaseVersion] = useState<number>();
   const [newProcessorDraft, setNewProcessorDraft] = useState<Config | null>(
     null,
   );
   const activeProcessor = processors.find((p) => p.id === activeProcessorId);
   function chooseProcessor(p: Processor, config = p.config) {
     setActiveProcessorId(p.id);
+    setConfigBaseVersion(p.version);
+    if (mode === "live") localStorage.setItem(`ezpz-live-config-base:${p.id}`, JSON.stringify(p.version));
     localStorage.setItem(
       mode === "demo"
         ? "ezpz-redesign-active-processor"
@@ -210,7 +215,7 @@ function useStore() {
         await api.saveProcessorVersion(activeProcessor.id, config, {
           name: name.trim(),
           description,
-        });
+        }, configBaseVersion);
         next = api.normalizeProcessor(
           (await api.request(`/processors/${activeProcessor.id}`)).processor,
         );
@@ -232,6 +237,8 @@ function useStore() {
           ],
         };
       }
+      setConfigBaseVersion(next.version);
+      if (mode === "live") localStorage.setItem(`ezpz-live-config-base:${next.id}`, JSON.stringify(next.version));
       persistProcessors(processors.map((p) => (p.id === next.id ? next : p)));
       setMessage(`Saved ${next.name} · version ${next.version}.`);
       return true;
@@ -382,7 +389,8 @@ function useStore() {
       setProcessors(data.processors);
       setEvalGroups(data.evalGroups);
       setAdapters(data.adapters);
-      const savedDocument = readStored("ezpz-live-document", "");
+      const linkParams = new URLSearchParams(location.search);
+      const savedDocument = linkParams.get("document") || readStored("ezpz-live-document", "");
       setSelectedId(
         data.documents.find((d) => d.id === savedDocument)?.id ||
           data.documents[0]?.id ||
@@ -393,6 +401,7 @@ function useStore() {
         data.processors.find((p) => p.id === savedProcessor) ||
         data.processors[0];
       setActiveProcessorId(processor?.id || "");
+      setConfigBaseVersion(readStored(`ezpz-live-config-base:${processor?.id}`, processor?.version));
       setConfig(
         readStored(
           `ezpz-live-config:${processor?.id || "scratch"}`,
@@ -405,9 +414,10 @@ function useStore() {
       const url = new URL(location.href);
       url.searchParams.delete("demo");
       history.replaceState(null, "", url);
-      const savedReview = readStored("ezpz-live-review-run", "");
+      const savedReview = linkParams.get("run") || readStored("ezpz-live-review-run", "");
       const run = data.runs.find((r) => r.id === savedReview) || data.runs[0];
       if (run) await loadReviewRun(run.id, data.documents, true);
+      if (run && linkParams.get("run")) location.hash = evaluationPath(run.groupId || `legacy:${run.datasetId}`, run.experimentId || `legacy:${run.id}`, run.id);
     } catch (e) {
       if (attempt === connectionAttempt.current) {
         setConnection("offline");
@@ -465,8 +475,37 @@ function useStore() {
     demo();
     setMessage("Demo reset to the original sample documents and experiments.");
   }
+  // Read a cheap database revision before refreshing external changes. Config/editor
+  // state stays local; their original version/revision remains the save precondition.
+  const externalRefresh = useRef<(current: () => boolean) => Promise<void>>(async () => {});
+  externalRefresh.current = async (current) => {
+    await refresh(current);
+    if (current()) setWorkspaceRevision(v => v + 1);
+  };
+  useEffect(() => {
+    if (mode !== "live" || connection !== "ready" || busy) return;
+    let stopped = false;
+    let inFlight = false;
+    let revision: number | undefined;
+    const poll = async () => {
+      if (stopped || inFlight || document.visibilityState === "hidden") return;
+      inFlight = true;
+      try {
+        const state = await api.request("/workspace/revision", { signal: AbortSignal.timeout(5000) });
+        if (!stopped && state.revision !== revision) {
+          await externalRefresh.current(() => !stopped);
+          if (!stopped) revision = state.revision;
+        }
+      } catch { /* Keep the current workspace and retry on the next tick. */ }
+      finally { inFlight = false; }
+    };
+    const timer = window.setInterval(poll, 2000);
+    window.addEventListener("focus", poll);
+    void poll();
+    return () => { stopped = true; window.clearInterval(timer); window.removeEventListener("focus", poll); };
+  }, [mode, connection, busy]);
   const hasRunningEvaluation = runs.some((r) =>
-    ["running", "cancelling"].includes(r.status.toLowerCase()),
+    ["running", "pausing", "cancelling"].includes(r.status.toLowerCase()),
   );
   useEffect(() => {
     if (mode !== "live" || !hasRunningEvaluation) return;
@@ -485,9 +524,10 @@ function useStore() {
       window.clearInterval(timer);
     };
   }, [mode, hasRunningEvaluation]);
-  async function refresh() {
+  async function refresh(current: () => boolean = () => true) {
     if (mode === "live") {
       const data = await api.loadWorkspace();
+      if (!current()) return;
       setDocuments((current) =>
         data.documents.map((d) => ({
           ...current.find((old) => old.id === d.id),
@@ -582,9 +622,13 @@ function useStore() {
           ...selected,
           fields: api.extractionFields(extraction, ground_truth),
           groundTruth: ground_truth?.value || {},
+          groundTruthRevision: ground_truth?.revision || 0,
+          annotationStatus: ground_truth?.annotation_status,
+          annotationAuthor: ground_truth?.author,
           status: "Extracted",
           runId: undefined,
           warnings: extraction.warnings || result.warnings || [],
+          harnessSteps: extraction.result?.provenance?.harness_steps,
         };
         updateDocument(extracted);
         if (page !== "Configuration")
@@ -708,21 +752,25 @@ function useStore() {
     d: Document,
     value: Record<string, JsonValue>,
     target?: { id?: string; name?: string },
+    expectedRevision = d.groundTruthRevision,
   ): Promise<ExpectedSaveResult> {
     setMessage("");
     setBusy(true);
+    ++documentRequest.current; // A pre-save inspection must not restore an older revision.
     let groundTruthSaved = false;
+    let groundTruthRevision: number | undefined;
     let dataset: Dataset | undefined;
     let alreadyMember = false;
     try {
       if (mode === "live") {
-        const saved = await api.saveGroundTruth(d.id, value);
+        const saved = await api.saveGroundTruth(d.id, value, expectedRevision);
         if (!equalValues(saved.ground_truth?.value ?? null, value))
           throw new Error(
             "The API did not confirm the expected values. Please retry.",
           );
         groundTruthSaved = true;
-        updateExpectedValues(d.id, value);
+        groundTruthRevision = saved.ground_truth.revision;
+        setDocuments(ds => ds.map(doc => doc.id === d.id ? { ...withExpectedValues(doc, value), groundTruthRevision, annotationStatus: "complete", annotationAuthor: "local" } : doc));
         if (target) {
           if (target.id) {
             const data = await api.request(
@@ -803,14 +851,14 @@ function useStore() {
           ]);
         }
       }
-      return { ok: true, groundTruthSaved, dataset, alreadyMember };
+      return { ok: true, groundTruthSaved, groundTruthRevision, dataset, alreadyMember };
     } catch (e) {
       const reason = e instanceof Error ? e.message : "Please try again.";
       const error = groundTruthSaved
         ? `Ground truth was saved, but the dataset operation could not be confirmed. ${reason}`
         : `Ground truth could not be saved. ${reason}`;
       setMessage(error);
-      return { ok: false, groundTruthSaved, dataset, alreadyMember, error };
+      return { ok: false, groundTruthSaved, groundTruthRevision, dataset, alreadyMember, error };
     } finally {
       setBusy(false);
     }

@@ -119,3 +119,5 @@ const timed = normalizeRun({ id: "timed", metrics: { average_latency_ms: 9758 },
   started_at: "2026-09-08T03:42:23.389111Z", completed_at: "2026-09-08T03:52:40.099541Z" });
 assert.equal(timed.latency, 9.758);
 assert.ok(Math.abs(timed.duration! - 616.710) < 0.001);
+
+assert.equal(normalizeRun({ id: "agent-run", metadata: { agent_benchmark_fingerprint: "same-benchmark" } }).benchmarkFingerprint, "same-benchmark");

@@ -1,0 +1,203 @@
+import assert from "node:assert/strict";
+import { mkdir } from "node:fs/promises";
+import { createServer } from "node:http";
+import { chromium, expect } from "@playwright/test";
+import { newBlock } from "../src/harness";
+import { evaluationPath } from "../src/evaluation-model";
+const base = process.env.STUDIO_BROWSER_URL;
+if (!base || process.env.STUDIO_TEST_DISPOSABLE !== "1") throw new Error("Use the isolated --harness runner");
+const browser = await chromium.launch({ headless: true });
+const page = await browser.newPage({ viewport: { width: 1512, height: 1000 } });
+page.setDefaultTimeout(15000);
+const errors: string[] = [];
+page.on("pageerror", error => errors.push(error.message));
+const api = async (path: string, data?: unknown) => {
+  const response = data === undefined ? await page.request.get(`${base}/v1${path}`) : await page.request.post(`${base}/v1${path}`, { data });
+  const result = await response.json(); assert.ok(response.ok(), JSON.stringify(result)); return result;
+};
+const clickArrow = async (arrow: import('@playwright/test').Locator) => {
+  await expect(arrow).toBeVisible();
+  const point = await arrow.evaluate(edge => {
+    const path = edge.querySelector('.react-flow__edge-path') as SVGPathElement;
+    const matrix = path.getScreenCTM()!;
+    for (const fraction of [.25, .5, .75, .15, .85]) {
+      const p = path.getPointAtLength(path.getTotalLength() * fraction).matrixTransform(matrix);
+      const hit = document.elementFromPoint(p.x, p.y);
+      if (hit && edge.contains(hit)) return { x: p.x, y: p.y };
+    }
+    throw new Error('No exposed point on the rendered connection');
+  });
+  await page.mouse.click(point.x, point.y);
+};
+const choose = async (label: string, option: string) => {
+  await page.getByRole('combobox', { name: label, exact: true }).click();
+  await page.getByRole('option', { name: option, exact: true }).click();
+};
+let calls = 0;
+const provider = createServer((request, response) => {
+  request.resume();
+  calls++;
+  setTimeout(() => { response.setHeader("content-type", "application/json"); response.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ total: { value: 75, confidence: .98 } }) } }], usage: { prompt_tokens: 10, completion_tokens: 5 } })); }, 1200);
+});
+await new Promise<void>(resolve => provider.listen(0, "127.0.0.1", resolve));
+try {
+  await page.goto(`${base}/#Processors`);
+  await page.getByRole("button", { name: "New processor", exact: true }).click();
+  await page.getByLabel("Processor name", { exact: true }).fill("Harness browser fixture");
+  await page.getByRole("button", { name: "Create & customize" }).click();
+  await page.getByRole("button", { name: "Edit JSON", exact: true }).click();
+  await page.getByLabel("Schema JSON").fill(JSON.stringify({ type: "object", properties: { total: { type: "number" } }, required: ["total"] }));
+  await page.getByRole("button", { name: "Apply JSON", exact: true }).click();
+  await page.getByRole("tab", { name: "Harness", exact: true }).click();
+  await choose("Starting recipe", "Tiered extraction");
+  await page.getByRole("button", { name: "Use recipe", exact: true }).click();
+  await page.getByRole("button", { name: "Edit Tiered extraction", exact: true }).click();
+  await choose("Escalation scope", "Only unresolved fields");
+  await page.getByLabel("Confidence threshold", { exact: true }).fill("0.92");
+  await page.getByRole("button", { name: "Open Tiered extraction flow", exact: true }).click();
+  // Reconnect the dotted accepted arrow by dragging its target endpoint.
+  await page.locator('.harness-canvas').scrollIntoViewIfNeeded();
+  const acceptedEdge = page.locator('.react-flow__edge.harness-edge-accepted').first();
+  await clickArrow(acceptedEdge);
+  await expect(page.getByRole('combobox', { name: 'Connection condition', exact: true })).toContainText('Accepted');
+  const endpoint = acceptedEdge.locator('.react-flow__edgeupdater-target');
+  const nextTier = page.locator('.react-flow__node').nth(2).locator('[data-handleid="in"]');
+  await endpoint.click({ trial: true }); await nextTier.click({ trial: true });
+  const endpointBox = (await endpoint.boundingBox())!, nextTierBox = (await nextTier.boundingBox())!;
+  await page.mouse.move(endpointBox.x + endpointBox.width / 2, endpointBox.y + endpointBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(endpointBox.x + endpointBox.width / 2 - 5, endpointBox.y + endpointBox.height / 2 - 5);
+  await expect(page.locator('.react-flow__connection-path')).toBeVisible();
+  await page.mouse.move(nextTierBox.x + nextTierBox.width / 2, nextTierBox.y + nextTierBox.height / 2, { steps: 20 });
+  await expect(nextTier).toHaveClass(/valid/);
+  await page.mouse.up();
+  await expect(page.getByRole('combobox', { name: 'Connection destination', exact: true })).toContainText('2. Extract');
+  await page.getByRole('button', { name: 'Delete connection', exact: true }).click();
+  await expect(page.locator('.react-flow__edge.harness-edge-accepted')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect(page.locator('.react-flow__edge.harness-edge-accepted')).toHaveCount(1);
+  await page.getByRole("button", { name: "Edit Extract", exact: true }).nth(1).click();
+  await choose("Block type", "Majority vote");
+  await expect(page.getByLabel("Required agreeing voters")).toHaveValue("2");
+  await expect(page.locator('.harness-editor select')).toHaveCount(0);
+  await expect(page.locator('.harness-editor .field-select-trigger')).not.toHaveCount(0);
+  await page.getByRole('button', { name: 'Open Majority vote flow', exact: true }).click();
+  await expect(page.locator('.harness-canvas .react-flow__node')).toHaveCount(5);
+  await expect(page.locator('.harness-canvas .react-flow__edge')).toHaveCount(6);
+  await mkdir(".screenshots", { recursive: true });
+  await page.locator(".harness-canvas-toolbar").evaluate(element => element.scrollIntoView({ block: "start" }));
+  await page.screenshot({ path: ".screenshots/harness-builder-desktop.png" });
+  await page.getByRole('combobox', { name: 'Block type', exact: true }).click();
+  await expect(page.locator('.field-select-menu')).toBeVisible();
+  await page.screenshot({ path: '.screenshots/harness-dropdown.png' });
+  await page.keyboard.press('Escape');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator(".harness-canvas-toolbar").evaluate(element => element.scrollIntoView({ block: "start" }));
+  await page.screenshot({ path: ".screenshots/harness-builder-mobile.png", animations: "disabled" });
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "Builder must not overflow mobile viewport");
+  await page.setViewportSize({ width: 1512, height: 1000 });
+  // Node dragging persists only presentation; the execution configuration stays unchanged.
+  await page.locator('.harness-canvas-toolbar').evaluate(element => element.scrollIntoView({ block: 'start' }));
+  const draggable = page.locator('.harness-canvas .react-flow__node').nth(1);
+  const dragId = await draggable.getAttribute('data-id');
+  const dragBox = (await draggable.locator('.harness-node-icon').boundingBox())!;
+  const beforeTransform = await draggable.evaluate(element => (element as HTMLElement).style.transform);
+  await page.mouse.move(dragBox.x + dragBox.width / 2, dragBox.y + dragBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(dragBox.x + 100, dragBox.y + 70, { steps: 10 });
+  await page.mouse.up();
+  await expect.poll(() => draggable.evaluate(element => (element as HTMLElement).style.transform)).not.toBe(beforeTransform);
+  const draggedTransform = await draggable.evaluate(element => (element as HTMLElement).style.transform);
+  const savedPosition = await page.evaluate(id => Object.keys(localStorage).filter(key => key.startsWith('ezpz-harness-layout:')).some(key => JSON.parse(localStorage.getItem(key) || '{}')[id!]), dragId);
+  assert.ok(savedPosition, 'Dragging must persist local canvas position');
+  await page.getByRole("button", { name: "Save version", exact: true }).click();
+  await expect(page.getByText(/Saved Harness browser fixture/)).toBeVisible();
+  const processor = (await api("/processors")).processors.find((p: any) => p.name === "Harness browser fixture");
+  const saved = processor.versions[0];
+  assert.equal(saved.harness.flow.steps[0].tiers[1].kind, "consensus");
+  // Wiring a new node changes order in the saved AST; removing it preserves the recipe.
+  await page.getByRole('button', { name: 'Main flow', exact: true }).click();
+  await choose('New block type', 'Validate');
+  await page.getByRole('button', { name: 'Add step', exact: true }).click();
+  await page.getByRole('button', { name: 'JSON', exact: true }).click();
+  const withAdded = JSON.parse(await page.getByLabel('Harness JSON').inputValue());
+  const addedId = withAdded.flow.steps.at(-1).id;
+  await page.getByRole('button', { name: 'Canvas', exact: true }).click();
+  const inputHandle = page.locator('.react-flow__node[data-id="boundary:input"] [data-handleid="out"]');
+  const targetHandle = page.locator(`.react-flow__node[data-id="block:${addedId}"] [data-handleid="in"]`);
+  await page.locator('.harness-canvas').scrollIntoViewIfNeeded();
+  await page.getByRole('button', { name: 'Auto layout', exact: true }).click();
+  await expect(targetHandle).toBeVisible();
+  // Wait for the fit-view animation before measuring drag coordinates.
+  await inputHandle.click({ trial: true });
+  await targetHandle.click({ trial: true });
+  const from = (await inputHandle.boundingBox())!, to = (await targetHandle.boundingBox())!;
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 20 });
+  await expect(targetHandle).toHaveClass(/valid/);
+  await page.mouse.up();
+  await page.getByRole('button', { name: 'JSON', exact: true }).click();
+  assert.ok(JSON.parse(await page.getByLabel('Harness JSON').inputValue()).flow.routing.edges.some((edge: any) => edge.source === 'boundary:input' && edge.target === `block:${addedId}`), 'Canvas connections must persist');
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await page.getByRole('button', { name: 'Canvas', exact: true }).click();
+  await page.getByRole('button', { name: 'Remove block', exact: true }).click();
+  await page.getByRole('button', { name: 'Save version', exact: true }).click();
+  await expect(page.getByText('Saved Harness browser fixture · version 3.', { exact: true })).toBeVisible();
+  await page.reload();
+  await page.getByRole("tab", { name: "Harness", exact: true }).click();
+  await page.getByRole('button', { name: 'Open Tiered extraction flow', exact: true }).click();
+  await expect(page.locator(".harness-flow")).toContainText("3 voters");
+  await page.getByRole('button', { name: 'Open Majority vote flow', exact: true }).click();
+  await expect.poll(() => page.locator(`.react-flow__node[data-id="${dragId}"]`).evaluate(element => (element as HTMLElement).style.transform)).toBe(draggedTransform);
+  // Every group type supports editing and saving its connections through shared selects.
+  let savedVersionNumber = 3;
+  for (const kind of ['sequence', 'cascade', 'consensus', 'parallel', 'gate', 'repair', 'pages'] as const) {
+    const flow = newBlock(kind);
+    await page.getByRole('button', { name: 'JSON', exact: true }).click();
+    await page.getByLabel('Harness JSON').fill(JSON.stringify({ ...saved.harness, flow }));
+    await page.getByRole('button', { name: 'Apply JSON', exact: true }).click();
+    await page.getByRole('button', { name: 'Canvas', exact: true }).click();
+    await page.locator('.harness-canvas').scrollIntoViewIfNeeded();
+    const firstArrow = page.locator('.react-flow__edge').first();
+    await clickArrow(firstArrow);
+    const destinationLabel = await page.locator('.react-flow__node[data-id="boundary:output"] strong').innerText();
+    await choose('Connection destination', destinationLabel);
+    await choose('Connection condition', 'Always');
+    await page.getByRole('button', { name: 'Save version', exact: true }).click();
+    await expect(page.getByText(`Saved Harness browser fixture · version ${++savedVersionNumber}.`, { exact: true })).toBeVisible();
+    const latest = (await api('/processors')).processors.find((p: any) => p.id === processor.id).versions[0];
+    assert.equal(latest.harness.flow.kind, kind);
+    assert.ok(latest.harness.flow.routing.edges.some((edge: any) => edge.source === 'boundary:input' && edge.target === 'boundary:output' && edge.condition === 'always'), `${kind} connection must persist`);
+  }
+  const docs: string[] = [];
+  for (let i = 0; i < 3; i++) {
+    const response = await page.request.post(`${base}/v1/documents`, { multipart: { file: { name: `recovery-${i}.txt`, mimeType: "text/plain", buffer: Buffer.from(`Invoice ${i}\nTotal due $75.00`) } } });
+    assert.ok(response.ok()); docs.push((await response.json()).document.id);
+  }
+  // Exercise the composed flow against the local deterministic model.
+  const preview = await api(`/processors/${processor.id}/draft/preview`, { document_id: docs[0], config: { ...saved, harness: saved.harness } });
+  assert.ok(preview.extraction?.result?.provenance?.harness_steps?.length || preview.result?.provenance?.harness_steps?.length, JSON.stringify(preview).slice(0, 300));
+  const port = (provider.address() as any).port;
+  const slow = await api("/processors", { name: "Resume fixture", config: { schema: saved.schema, prompt: {}, parser: { name: "native" }, model: { provider: "openai-compatible", name: "test-model", base_url: `http://127.0.0.1:${port}/v1` }, harness: { name: "workflow", version: 1, input: "parsed", flow: { id: "extract", kind: "extract" } } } });
+  const dataset = (await api("/datasets", { name: "Resume fixture" })).dataset;
+  for (const id of docs) await api(`/datasets/${dataset.id}/documents`, { document_id: id });
+  const run = (await api("/runs", { dataset_id: dataset.id, processor: slow.processor.id, background: true })).run;
+  await page.goto(`${base}/${evaluationPath(run.eval_group.id, run.eval_experiment_id, run.id)}`);
+  await page.reload();
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Resume evaluation", exact: true })).toBeVisible();
+  const paused = (await api(`/runs/${run.id}`)).run;
+  const completed = paused.metrics.completed;
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Resume evaluation", exact: true })).toBeVisible();
+  await page.screenshot({ path: ".screenshots/harness-paused-run.png", fullPage: true });
+  await page.getByRole("button", { name: "Resume evaluation", exact: true }).click();
+  await expect.poll(async () => (await api(`/runs/${run.id}`)).run.status, { timeout: 20000 }).toBe("completed");
+  const final = (await api(`/runs/${run.id}`)).run;
+  assert.equal(final.metrics.completed, 3); assert.ok(final.metrics.completed >= completed);
+  assert.equal(final.extractions.length, 3); assert.equal(calls, 3, "Resume must not repeat a completed provider call");
+  assert.deepEqual(final.metadata.benchmark_snapshot, paused.metadata.benchmark_snapshot);
+  assert.deepEqual(errors, []);
+  console.log("React Flow composition, connections, dragging, shared dropdowns, version round-trip, mobile layout, and pause/reload/resume passed");
+} catch (error) { console.error("Browser errors:", errors); console.error((await page.locator("body").innerText()).slice(-6000)); await page.screenshot({ path: ".screenshots/harness-browser-failure.png", fullPage: true }); throw error; } finally { await browser.close(); await new Promise<void>(resolve => provider.close(() => resolve())); }

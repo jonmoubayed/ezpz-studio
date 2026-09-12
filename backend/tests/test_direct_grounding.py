@@ -106,18 +106,27 @@ class DirectGroundingTests(unittest.TestCase):
             request.assert_not_called()
 
     def test_no_parser_execution_persists_boxes_and_reuses_cache(self):
+        self.check_direct_execution({"name": "none"}, {"name": "direct"})
+
+    def test_document_workflow_persists_boxes_and_reuses_cache(self):
+        self.check_direct_execution({"name": "llama-parse"}, {
+            "name": "workflow", "version": 1, "input": "document",
+            "flow": {"id": "extract", "kind": "extract"},
+        })
+
+    def check_direct_execution(self, parser, harness):
         with TemporaryDirectory() as directory, patch.dict(os.environ, {"EZPZ_SEED_DEMO": "false", "OPENAI_API_KEY": "test"}):
             runtime = create_runtime(Path(directory))
             db = runtime.database
             doc = runtime.ingestor.ingest("source.png", PNG, "image/png")["document"]
             db.upsert_processor_draft("invoice-extractor", {
-                "schema": SCHEMA, "parser": {"name": "none"},
+                "schema": SCHEMA, "parser": parser,
                 "model": {"provider": "openai", "name": "gpt-4.1"},
-                "harness": {"name": "direct"},
+                "harness": harness,
             })
             db.publish_processor_draft("invoice-extractor")
             response = {"choices": [{"message": {"content": json.dumps(OUTPUT)}}]}
-            with patch("backend.pipeline.parse_document", side_effect=AssertionError("Parser must not run")), patch("urllib.request.urlopen", return_value=io.BytesIO(json.dumps(response).encode())) as request:
+            with patch("backend.harness_runtime.parse_document", side_effect=AssertionError("Parser must not run")), patch("urllib.request.urlopen", return_value=io.BytesIO(json.dumps(response).encode())) as request:
                 extracted = runtime.extractions.extract_document(doc["id"])
                 saved = db.get_extraction(extracted["id"])
                 self.assertEqual(saved["parser_ir"]["parser"]["name"], "none")
