@@ -499,7 +499,7 @@ export function Playground() {
                           {f.area ? (
                             <>
                               <Focus size={11} />
-                              Source · page {f.page || 1}
+                              {f.citations?.[0]?.source === "model" ? "Model estimate" : "Source"} · page {f.page || 1}
                               <ArrowUpRightIcon />
                             </>
                           ) : (
@@ -782,7 +782,7 @@ export function ReviewQueue() {
               <span>
                 <Focus size={13} />
                 {current.f.area
-                  ? `Citation on page ${current.f.page || 1}`
+                  ? `${current.f.citations?.[0]?.source === "model" ? "Model-estimated box" : "Citation"} on page ${current.f.page || 1}`
                   : "No citation for this field"}
               </span>
               <span>Viewer by Extend UI</span>

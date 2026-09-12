@@ -10,6 +10,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .costing import estimate_cost
 from .confidence import CONTRACT_VERSION, valid_confidence
+from .grounding import original_document_ir, valid_region
+from .adapters import normalize_parser_name
 from .db import Database
 from .evaluation import aggregate_evaluations, score_extraction
 from .harness import run_harness
@@ -153,30 +155,19 @@ def canonicalize(
         raw = _get_path(output, path)
         value, confidence, raw_evidence, errors = _unwrap_value(raw)
         evidence = []
-        for item in raw_evidence:
+        for item in raw_evidence if isinstance(raw_evidence, list) else []:
             if isinstance(item, Evidence):
-                evidence.append(item)
-            elif isinstance(item, dict):
-                raw_bbox = item.get("bbox")
-                if not isinstance(raw_bbox, (list, tuple)) or len(raw_bbox) < 4:
-                    continue
-                try:
-                    bbox = [float(point) for point in raw_bbox[:4]]
-                except (TypeError, ValueError):
-                    continue
-                metadata = dict(item.get("metadata") or {})
-                for key in ("bbox_source", "grounding", "source_index"):
-                    if key in item and key not in metadata:
-                        metadata[key] = item[key]
-                evidence.append(
-                    Evidence(
-                        page=int(item.get("page", 1)),
-                        bbox=bbox,
-                        text=str(item.get("text", "")),
-                        block_id=item.get("block_id"),
-                        metadata=metadata,
-                    )
-                )
+                item = item.to_dict()
+            if not isinstance(item, dict):
+                continue
+            region = valid_region(item, parser_ir.metadata.get("page_count"))
+            if not region:
+                continue
+            metadata = dict(item["metadata"]) if isinstance(item.get("metadata"), dict) else {}
+            for key in ("bbox_source", "grounding", "source_index"):
+                if key in item and key not in metadata:
+                    metadata[key] = item[key]
+            evidence.append(Evidence(**region, block_id=item.get("block_id"), metadata=metadata))
         if not evidence:
             evidence = _evidence_for_value(parser_ir, value)
         fields[path] = FieldResult(
@@ -287,7 +278,11 @@ class ExtractionService:
 
             data = self.blobs.get(document["blob_key"])
             parser_started = time.perf_counter()
-            parser_ir = parse_document(document, data, processor_version.get("parser", {}))
+            parser_config = processor_version.get("parser", {})
+            direct_input = normalize_parser_name(parser_config.get("name") or parser_config.get("provider")) == "none"
+            if direct_input and str(processor_version.get("harness", {}).get("name", "")).strip().lower() == "page_extract":
+                raise ValueError("Page extraction requires parsed pages. Use the direct harness with original document input.")
+            parser_ir = original_document_ir(document, data) if direct_input else parse_document(document, data, parser_config)
             parser_latency_ms = int((time.perf_counter() - parser_started) * 1000)
             model = self._model(processor_version)
             model_started = time.perf_counter()
@@ -301,6 +296,8 @@ class ExtractionService:
                 processor_version.get("model", {}),
             )
             model_latency_ms = int((time.perf_counter() - model_started) * 1000)
+            # Source bytes are transient request input, not duplicated in saved results.
+            parser_ir.metadata.pop("source_input", None)
             canonical = canonicalize(
                 harness_result.output,
                 processor_version.get("schema", {}),

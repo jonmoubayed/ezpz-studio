@@ -78,3 +78,23 @@ assert.equal(
 console.log(
   "PASS: normalized and absolute coordinates, multi-page evidence, degenerate boxes, absent vs explicit null/zero/false ground truth, nested paths, and exact typed comparisons.",
 );
+
+const modelBoxes = extractionCitations({parser_ir: {pages: []}}, [
+  {page: 2, bbox: [.1, .2, .4, .3], metadata: {bbox_source: "model"}},
+]);
+assert.equal(modelBoxes[0].source, "model");
+assert.equal(modelBoxes[0].page, 2);
+assert.equal(modelBoxes[0].area.left, 10);
+assert.equal(modelBoxes[0].area.top, 20);
+assert.equal(extractionCitations({}, [{page: 1, bbox: [0, 0, 1, 1]}])[0].source, undefined);
+
+const { createElement } = await import("react");
+const { renderToStaticMarkup } = await import("react-dom/server");
+const { HumanReviewHighlight } = await import("../src/components/extend/human-review-highlight");
+const estimatedMarkup = renderToStaticMarkup(createElement(HumanReviewHighlight, {location: modelBoxes[0]}));
+assert.match(estimatedMarkup, /Model-estimated source box on page 2/);
+assert.match(estimatedMarkup, /border-style:dashed/);
+assert.match(estimatedMarkup, /left:10%/);
+const groundedMarkup = renderToStaticMarkup(createElement(HumanReviewHighlight, {location: {page: 1, area: modelBoxes[0].area}}));
+assert.match(groundedMarkup, /Source citation on page 1/);
+assert.match(groundedMarkup, /border-style:solid/);

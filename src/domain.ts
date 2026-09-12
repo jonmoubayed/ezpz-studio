@@ -19,6 +19,7 @@ export function displayValue(value: JsonValue): string {
       : String(value);
 }
 export type Citation = {
+  source?: "model";
   page: number;
   area: { left: number; top: number; width: number; height: number };
 };
