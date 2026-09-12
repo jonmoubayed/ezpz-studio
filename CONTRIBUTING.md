@@ -44,6 +44,15 @@ npm run test:package
 
 The package check runs the complete browser flow against the built image, then verifies restart recovery and backup restoration with disposable volumes. Never point the browser integration test at a real workspace. CI checks both ARM64 and AMD64 containers; hosted model quality needs separate, explicitly configured testing.
 
+For Python packaging changes, run `python scripts/build-package.py` and then
+`python scripts/test-install.py release/<wheel-filename>.whl`. Before installing
+the source project with pip, stage its frontend using
+`python scripts/build-package.py --frontend-only`. The merge build uses the current
+`src/` and `backend/`, tests the resulting wheel on Linux/macOS/Windows, and makes
+a verified artifact available after every check passes. See
+[Python wheel builds](docs/python-wheel.md). Do not commit `dist/`,
+`backend/studio/`, or `release/`.
+
 ## Source map
 
 | Path | Responsibility |

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 from backend.evaluation import compare_evaluations
+from backend.paths import default_runtime_root
 from backend.server import create_runtime
 from backend.models import new_id
 from backend.project_config import write_project_config
@@ -127,7 +128,7 @@ def _print(value: Any, as_json: bool) -> None:
 
 
 def _add_common(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parent, help="ezpz project/runtime root")
+    parser.add_argument("--root", type=Path, default=default_runtime_root(), help="workspace folder (installed: user data directory; also EZPZ_WORKSPACE)")
     parser.add_argument("--json", action="store_true", dest="as_json", help="emit machine-readable JSON")
 
 
@@ -143,6 +144,11 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=4173)
     serve.add_argument("--no-open", action="store_true", help="do not open the workbench in a browser")
+
+    studio = commands.add_parser("studio", help="open the packaged Studio and local API")
+    studio.add_argument("--host", default="127.0.0.1")
+    studio.add_argument("--port", type=int, default=4173)
+    studio.add_argument("--no-open", action="store_true", help="do not open the workbench in a browser")
 
     documents = commands.add_parser("documents", aliases=["docs"], help="ingest and inspect source artifacts")
     document_commands = documents.add_subparsers(dest="documents_command", required=True)
@@ -247,6 +253,10 @@ def _normalize_global_options(argv: List[str]) -> List[str]:
 
 
 def _run(args: argparse.Namespace) -> Any:
+    if args.command == "studio":
+        from backend.launcher import launch
+        return launch(args.root, args.host, args.port, open_browser=not args.no_open)
+
     if args.command == "serve":
         from backend.server import make_server
 

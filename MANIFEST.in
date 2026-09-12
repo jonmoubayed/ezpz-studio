@@ -1,0 +1,3 @@
+include LICENSE README.md setup.py
+recursive-include backend/studio *
+recursive-include docs *.md
