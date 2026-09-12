@@ -1,3 +1,5 @@
+import { extractionValues, fieldTree } from "./extraction-output";
+import { ExtractionFields } from "./extraction-fields";
 import { ConfidenceBadge } from "./ui";
 import { ExpectedValuesEditor, FieldValues } from "./expected-values";
 import { withExpectedValues } from "./result-model";
@@ -233,7 +235,7 @@ export function Configuration() {
               <TabsTrigger value="results">
                 <Braces size={14} />
                 Results{" "}
-                {preview && <span>{preview.document.fields.length}</span>}
+                {preview && <span>{fieldTree(preview.document.fields).length}</span>}
               </TabsTrigger>
               <TabsTrigger value="code">
                 <Code2 size={14} /> Code
@@ -492,9 +494,7 @@ function ProcessorPreview({
     ? withExpectedValues(preview.document, latest.groundTruth)
     : preview.document;
   const [view, setView] = useState("fields");
-  const output = Object.fromEntries(
-    preview.document.fields.map((f) => [f.key, f.value]),
-  );
+  const output = extractionValues(preview.document.fields);
   return (
     <div className="processor-preview">
       <div className="processor-preview-status">
@@ -502,7 +502,7 @@ function ProcessorPreview({
           <Check size={13} />
           {preview.demo ? "Sample extraction" : "Extraction complete"}
         </span>
-        <Badge>{preview.document.fields.length} fields</Badge>
+        <Badge>{fieldTree(preview.document.fields).length} fields</Badge>
       </div>
       <div className="processor-preview-context">
         <span>
@@ -546,7 +546,7 @@ function ProcessorPreview({
         </TabsList>
         <TabsContent value="fields">
           <div className="processor-preview-fields">
-            {resultDocument.fields.map((f) => (
+            <ExtractionFields fields={resultDocument.fields} renderField={(f, name) => (
               <article
                 className={`processor-preview-field ${activeField === f.key ? "active" : ""}`}
                 key={f.key}
@@ -558,7 +558,7 @@ function ProcessorPreview({
                   aria-label={`Inspect source for ${f.key}`}
                   aria-pressed={activeField === f.key}
                 >
-                  <strong>{f.key}</strong>
+                  <strong>{name}</strong>
                   <ConfidenceBadge field={f} />
                 </button>
                 <FieldValues field={f} />
@@ -573,7 +573,7 @@ function ProcessorPreview({
                   )}
                 </small>
               </article>
-            ))}
+            )} />
             {!preview.document.fields.length && (
               <Empty
                 title="No fields returned"

@@ -5137,3 +5137,38 @@ h1 {
 .processor-code-editor { width: 100%; flex: 1; min-height: 300px; resize: vertical; padding: 16px; border: 1px solid var(--border); border-radius: 8px; background: #f7f9f4; color: #263321; font: 11px/1.8 var(--font-mono); tab-size: 4; }
 .processor-code-editor:focus-visible { outline: 2px solid #6f8755; outline-offset: 2px; }
 .processor-code-status { font-size: 11px; min-height: 18px; color: var(--muted); }
+
+/* Nested extraction objects share one container, while leaves retain their citations. */
+.extraction-object {
+  flex-shrink: 0;
+  min-width: 0;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  overflow: hidden;
+}
+.extraction-object > summary {
+  cursor: pointer;
+  padding: 13px;
+  font: 12px var(--font-mono);
+  overflow-wrap: anywhere;
+  background: #f7f8f5;
+}
+.extraction-object > summary > strong { margin-left: 5px; }
+.extraction-object > summary > span {
+  display: inline-block;
+  margin-left: 12px;
+  font: 10px var(--font-sans, sans-serif);
+  color: var(--muted);
+}
+.extraction-object > summary:focus-visible { outline: 2px solid #7d9166; outline-offset: -3px; }
+.extraction-object-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-top: 1px solid var(--border);
+}
+.extraction-object-fields > .field-card,
+.extraction-object-fields > .processor-preview-field { margin: 0; min-width: 0; }

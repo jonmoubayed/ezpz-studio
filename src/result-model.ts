@@ -1,3 +1,4 @@
+import { extractionValues } from "./extraction-output";
 import type { Citation, Document, Field, JsonValue } from "./domain";
 
 export function expectedValue(
@@ -25,8 +26,8 @@ export function hasExpected(field: Field) {
 export function expectedValues(document: Document): Record<string, JsonValue> {
   return (
     document.groundTruth ??
-    Object.fromEntries(
-      document.fields.filter(hasExpected).map((f) => [f.key, f.expected]),
+    extractionValues(
+      document.fields.filter(hasExpected).map((f) => ({ key: f.key, value: f.expected })),
     )
   );
 }
