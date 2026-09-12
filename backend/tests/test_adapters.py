@@ -19,7 +19,7 @@ class AdapterTests(unittest.TestCase):
     def test_catalog_exposes_initial_llm_and_parser_adapters(self):
         catalog = get_adapter_catalog()
         self.assertEqual({item["id"] for item in catalog["llm"]}, {"local", "openai", "anthropic", "gemini", "ollama", "openai-compatible"})
-        self.assertEqual({item["id"] for item in catalog["parsers"]}, {"native", "docling", "llama-parse"})
+        self.assertEqual({item["id"] for item in catalog["parsers"]}, {"none", "native", "docling", "llama-parse"})
 
     def test_legacy_model_names_are_normalized_without_changing_the_ui_contract(self):
         self.assertEqual(normalize_model_config({"name": "claude-3-5-sonnet"})["provider"], "anthropic")

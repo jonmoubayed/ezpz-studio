@@ -17,6 +17,14 @@ import contextlib, io, json, os, sys, tempfile, types
 from pathlib import Path
 case = json.load(sys.stdin)
 calls = []
+import urllib.request
+def direct_request(request, **kwargs):
+    calls.append({"url": request.full_url, "json": json.loads(request.data)})
+    text = json.dumps({"vendor": {"value": "Acme", "confidence": .9}})
+    body = {"choices": [{"message": {"content": text}}], "content": [{"type": "text", "text": text}],
+            "candidates": [{"content": {"parts": [{"text": text}]}}]}
+    return io.BytesIO(json.dumps(body).encode())
+urllib.request.urlopen = direct_request
 class Response:
     def __init__(self, body): self.body = body
     def raise_for_status(self): pass
@@ -95,3 +103,17 @@ test('LlamaParse failure stops before the LLM call', () => {
   assert.notEqual(result.status, 0)
   assert.match(result.stderr, /LlamaParse FAILED/)
 })
+
+for (const provider of ['openai', 'anthropic', 'google', 'ollama', 'openai-compatible']) {
+  test(`generated original-document Python executes without a parser: ${provider}`, () => {
+    const execution = run({...base, parser: 'none', provider});
+    assert.equal(execution.status, 0, execution.stderr);
+    const result = JSON.parse(execution.stdout);
+    assert.equal(result.calls.length, 1);
+    assert.equal(result.result.vendor.value, 'Acme');
+    assert.equal(result.result.vendor.confidence, .9);
+    assert.deepEqual(result.schema, schema);
+    assert.equal(result.prompt, base.prompt);
+    assert.doesNotMatch(result.calls[0].url, /llamaindex/);
+  });
+}
