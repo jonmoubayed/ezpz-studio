@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, unquote, urlparse
 
 from .config import Settings
+from .collaboration import AgentJobs, CollaborationHandler, RevisionConflict
 from .adapters import get_adapter_catalog
 from .db import Database, create_database, normalize_folder_path
 from .evaluation import compare_evaluations
@@ -45,16 +46,19 @@ class Runtime:
             ensure_empty_processor(self.database)
         self.ingestor = DocumentIngestor(self.database, self.blobs)
         self.extractions = ExtractionService(self.database, self.blobs)
+        self.agent_jobs = AgentJobs(self)
 
     def shutdown(self) -> None:
-        """Keep the server lifecycle explicit even though SQLite needs no pool."""
+        """Wait for submitted agent jobs before closing the runtime."""
+        self.agent_jobs.shutdown()
+        self.extractions.recovery.stopping.set()
 
 
 def create_runtime(root: Optional[Path] = None) -> Runtime:
     return Runtime(root or Path(__file__).resolve().parents[1])
 
 
-class EzpzHandler(BaseHTTPRequestHandler):
+class EzpzHandler(CollaborationHandler, BaseHTTPRequestHandler):
     runtime: Runtime
     static_root: Path
     server_version = "ezpz-local/0.1"
@@ -93,6 +97,8 @@ class EzpzHandler(BaseHTTPRequestHandler):
                 self._get_api(path, parse_qs(parsed.query))
             else:
                 self._serve_static(path)
+        except RevisionConflict as error:
+            self._error(409, str(error))
         except ValueError as error:
             self._error(400, str(error))
         except Exception as error:
@@ -110,6 +116,8 @@ class EzpzHandler(BaseHTTPRequestHandler):
                 self._post_api(path)
             else:
                 self._error(404, "Not found")
+        except RevisionConflict as error:
+            self._error(409, str(error))
         except ValueError as error:
             self._error(400, str(error))
         except Exception as error:
@@ -127,6 +135,8 @@ class EzpzHandler(BaseHTTPRequestHandler):
                 self._patch_api(path)
             else:
                 self._error(404, "Not found")
+        except RevisionConflict as error:
+            self._error(409, str(error))
         except ValueError as error:
             self._error(400, str(error))
         except Exception as error:
@@ -147,6 +157,8 @@ class EzpzHandler(BaseHTTPRequestHandler):
                 self._delete_api(path)
             else:
                 self._error(404, "Not found")
+        except RevisionConflict as error:
+            self._error(409, str(error))
         except ValueError as error:
             self._error(400, str(error))
         except Exception as error:
@@ -162,6 +174,8 @@ class EzpzHandler(BaseHTTPRequestHandler):
         return None
 
     def _get_api(self, path: str, query: Dict[str, Any]) -> None:
+        if self._get_collaboration(path, query):
+            return
         if path == "/v1/health":
             self._json(200, {"ok": True, "service": "ezpz", "mode": "local", "api_version": "v1"})
             return
@@ -292,7 +306,10 @@ class EzpzHandler(BaseHTTPRequestHandler):
             if not run:
                 self._error(404, "Run not found")
                 return
-            if len(parts) == 3 and parts[2] == "reviews":
+            if len(parts) == 3 and parts[2] == "steps":
+                from .harness_runtime import saved_run_steps
+                self._json(200, {"documents": saved_run_steps(self.runtime.database, run)})
+            elif len(parts) == 3 and parts[2] == "reviews":
                 self._json(200, {"run_id": parts[1], "review_decisions": self.runtime.database.list_review_decisions(parts[1], (query.get("reviewer") or [None])[0], (query.get("document_id") or [None])[0], (query.get("field") or query.get("field_path") or [None])[0])})
             elif len(parts) == 3 and parts[2] == "failures":
                 self._json(200, {"run_id": parts[1], "failures": self.runtime.database.list_run_failures(parts[1], (query.get("status") or [None])[0], (query.get("field") or query.get("field_path") or [None])[0])})
@@ -319,6 +336,8 @@ class EzpzHandler(BaseHTTPRequestHandler):
         self._error(404, "Not found")
 
     def _post_api(self, path: str) -> None:
+        if self._post_collaboration(path):
+            return
         if path == "/v1/documents":
             payload, file_part = self._request_payload()
             if not file_part:
@@ -399,8 +418,8 @@ class EzpzHandler(BaseHTTPRequestHandler):
             self._json(202 if payload.get("background") else 201, result)
             return
         parts = self._parts(path)
-        if len(parts) == 3 and parts[0] == "runs" and parts[2] == "cancel":
-            run = self.runtime.database.cancel_run(parts[1])
+        if len(parts) == 3 and parts[0] == "runs" and parts[2] in ("cancel", "pause", "resume"):
+            run = self.runtime.extractions.recovery.control(parts[1], parts[2])
             self._json(202 if run else 404, {"run": run} if run else {"error": "Run not found"})
             return
         if len(parts) == 3 and parts[0] == "eval-groups" and parts[2] == "experiments":
@@ -549,6 +568,7 @@ class EzpzHandler(BaseHTTPRequestHandler):
             "id": new_id("pv"),
             "processor_id": processor["id"],
             "version": 1,
+            "author": payload.get("author", "local"),
             "status": "draft",
             "schema": config.get("schema", blank_schema()),
             "prompt": config.get("prompt", blank_prompt()),
@@ -612,7 +632,7 @@ class EzpzHandler(BaseHTTPRequestHandler):
         tables = payload.get("table_annotations", existing.get("table_annotations", {}))
         if table_only and payload.get("table_annotations") is None:
             raise ValueError("table_annotations is required")
-        ground_truth = self.runtime.database.save_ground_truth(document_id, value, evidence, payload.get("annotation_status", existing.get("annotation_status", "complete")), payload.get("author", "local"), bool(payload.get("replace")), tables)
+        ground_truth = self.runtime.database.save_ground_truth(document_id, value, evidence, payload.get("annotation_status", existing.get("annotation_status", "complete")), payload.get("author", "local"), bool(payload.get("replace")), tables, expected_revision=payload.get("expected_revision"))
         self._json(200, {"ground_truth": ground_truth})
 
     def _save_review_decision(self, run_id: str) -> None:
@@ -927,7 +947,10 @@ def make_server(root: Optional[Path] = None, host: str = "127.0.0.1", port: int 
     try:
         # CLI readers must not change active jobs. Recover only after the API
         # successfully binds, so a failed duplicate startup cannot stop a run.
-        runtime.database._execute("UPDATE runs SET status = 'interrupted', error_text = 'Server restarted before the run finished. Run the experiment again.' WHERE status IN ('running', 'cancelling')")
+        runtime.extractions.recovery.recover_abandoned()
+        # Single-document runs have no dataset recovery lock or resumable worker.
+        runtime.database._execute("UPDATE runs SET status = 'interrupted', error_text = 'Server restarted before the run finished.' WHERE target_type != 'dataset' AND status IN ('running', 'cancelling')")
+        runtime.agent_jobs.recover()
     except Exception:
         server.server_close()
         raise

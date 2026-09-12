@@ -70,7 +70,7 @@ export function evaluationDocuments(
         status: score?.status || "unscored",
       } as Field;
     });
-    return { ...doc, fields, runId: raw.id, warnings: ex?.warnings ?? [] };
+    return { ...doc, fields, runId: raw.id, warnings: ex?.warnings ?? [], harnessSteps: ex?.result?.provenance?.harness_steps };
   });
 }
 export function demoEvaluationDocuments(run: Run): Document[] {

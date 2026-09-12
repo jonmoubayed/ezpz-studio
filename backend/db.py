@@ -4,11 +4,13 @@ import json
 import sqlite3
 import threading
 from contextvars import ContextVar
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 from .costing import run_cost_metrics
 from .models import new_id, utc_now
+from .collaboration import RevisionConflict, initialize_collaboration
 
 
 _WORKSPACE_CONTEXT: ContextVar[Optional[str]] = ContextVar("ezpz_workspace_id", default=None)
@@ -329,6 +331,7 @@ class Database:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._write_lock = threading.Lock()
+        self._unit = threading.local()
         self.workspace_id = workspace_id or "ws_local"
         self.project_id = project_id or "project_local"
 
@@ -361,6 +364,7 @@ class Database:
                 connection.execute("CREATE INDEX IF NOT EXISTS idx_runs_eval_experiment ON runs(eval_experiment_id, created_at DESC)")
                 connection.execute("CREATE INDEX IF NOT EXISTS idx_eval_groups_dataset ON eval_groups(dataset_id)")
                 connection.execute("CREATE INDEX IF NOT EXISTS idx_eval_experiments_processor_version ON eval_experiments(processor_version_id)")
+                initialize_collaboration(connection)
                 self._backfill_eval_structure(connection)
                 connection.commit()
             finally:
@@ -431,6 +435,8 @@ class Database:
                 )
 
     def _one(self, query: str, params: Iterable[Any] = ()) -> Optional[sqlite3.Row]:
+        if getattr(self._unit, "connection", None):
+            return self._unit.connection.execute(query, tuple(params)).fetchone()
         connection = self.connect()
         try:
             return connection.execute(query, tuple(params)).fetchone()
@@ -438,6 +444,8 @@ class Database:
             connection.close()
 
     def _all(self, query: str, params: Iterable[Any] = ()) -> List[sqlite3.Row]:
+        if getattr(self._unit, "connection", None):
+            return self._unit.connection.execute(query, tuple(params)).fetchall()
         connection = self.connect()
         try:
             return connection.execute(query, tuple(params)).fetchall()
@@ -445,6 +453,8 @@ class Database:
             connection.close()
 
     def _execute(self, query: str, params: Iterable[Any] = ()) -> int:
+        if getattr(self._unit, "connection", None):
+            return self._unit.connection.execute(query, tuple(params)).rowcount
         with self._write_lock:
             connection = self.connect()
             try:
@@ -455,9 +465,12 @@ class Database:
                 connection.close()
 
     def _transaction(self, callback):
+        if getattr(self._unit, "connection", None):
+            return callback(self._unit.connection)
         with self._write_lock:
             connection = self.connect()
             try:
+                connection.execute("BEGIN IMMEDIATE")
                 result = callback(connection)
                 connection.commit()
                 return result
@@ -465,6 +478,26 @@ class Database:
                 connection.rollback()
                 raise
             finally:
+                connection.close()
+
+    @contextmanager
+    def atomic(self):
+        """Group a result, its fields, and its score into one durable commit."""
+        if getattr(self._unit, "connection", None):
+            yield
+            return
+        with self._write_lock:
+            connection = self.connect()
+            self._unit.connection = connection
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                yield
+                connection.commit()
+            except BaseException:
+                connection.rollback()
+                raise
+            finally:
+                self._unit.connection = None
                 connection.close()
 
     def get_document(self, document_id: str) -> Optional[Dict[str, Any]]:
@@ -753,7 +786,7 @@ class Database:
             return documents
 
     def update_run_progress(self, run_id: str, metrics: Dict[str, Any]) -> None:
-        self._execute("UPDATE runs SET metrics_json = ? WHERE id = ? AND status IN ('running', 'cancelling')", (_dump(metrics), run_id))
+        self._execute("UPDATE runs SET metrics_json = ? WHERE id = ? AND status IN ('running', 'pausing', 'cancelling')", (_dump(metrics), run_id))
 
     def cancel_run(self, run_id: str) -> Optional[Dict[str, Any]]:
         self._execute("UPDATE runs SET status = 'cancelling' WHERE id = ? AND status = 'running' AND workspace_id = ? AND project_id = ?", (run_id, self._workspace_id(), self._project_id()))
@@ -843,9 +876,11 @@ class Database:
         return self.get_processor(processor["id"])
 
     def insert_processor_version(self, version: Dict[str, Any]) -> Dict[str, Any]:
+        from .harness_spec import validate_spec
+        validate_spec(version.get("harness", {}), version.get("schema", {}))
         if not self._one("SELECT 1 FROM processors WHERE id = ? AND workspace_id = ? AND project_id = ?", (version["processor_id"], self._workspace_id(), self._project_id())):
             raise ValueError("Processor not found in the active workbench")
-        self._execute("INSERT INTO processor_versions (id, processor_id, version, status, schema_json, prompt_json, parser_json, model_json, harness_json, normalization_json, created_at, immutable) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)", (version["id"], version["processor_id"], version["version"], version.get("status", "draft"), _dump(version.get("schema", {})), _dump(version.get("prompt", {})), _dump(version.get("parser", {})), _dump(version.get("model", {})), _dump(version.get("harness", {})), _dump(version.get("normalization", {})), version.get("created_at", utc_now())))
+        self._execute("INSERT INTO processor_versions (id, processor_id, version, status, schema_json, prompt_json, parser_json, model_json, harness_json, normalization_json, created_at, immutable, author) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)", (version["id"], version["processor_id"], version["version"], version.get("status", "draft"), _dump(version.get("schema", {})), _dump(version.get("prompt", {})), _dump(version.get("parser", {})), _dump(version.get("model", {})), _dump(version.get("harness", {})), _dump(version.get("normalization", {})), version.get("created_at", utc_now()), version.get("author", "local")))
         return self.get_processor_version(version["id"])  # type: ignore
 
     def get_processor_version(self, version_id: str) -> Optional[Dict[str, Any]]:
@@ -889,6 +924,8 @@ class Database:
             raise ValueError("Processor has no version to draft")
         supplied = config or {}
         values = {key: supplied.get(key, current.get(key) if current else base.get(key, {})) for key in ("schema", "prompt", "parser", "model", "harness", "normalization")}
+        from .harness_spec import validate_spec
+        validate_spec(values["harness"], values["schema"])
         now = utc_now()
         self._execute(
             "INSERT INTO processor_drafts (id, processor_id, base_version_id, schema_json, prompt_json, parser_json, model_json, harness_json, normalization_json, status, published_version_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', NULL, ?, ?) ON CONFLICT(processor_id) DO UPDATE SET base_version_id = excluded.base_version_id, schema_json = excluded.schema_json, prompt_json = excluded.prompt_json, parser_json = excluded.parser_json, model_json = excluded.model_json, harness_json = excluded.harness_json, normalization_json = excluded.normalization_json, status = 'draft', published_version_id = NULL, updated_at = excluded.updated_at",
@@ -1037,11 +1074,17 @@ class Database:
         rows = self._all("SELECT * FROM ground_truth WHERE document_id = ? ORDER BY revision DESC", (document_id,))
         return [self._ground_truth(row) for row in rows]
 
-    def save_ground_truth(self, document_id: str, value: Dict[str, Any], evidence: Optional[Dict[str, Any]] = None, annotation_status: str = "complete", author: str = "local", merge: bool = False, table_annotations: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def save_ground_truth(self, document_id: str, value: Dict[str, Any], evidence: Optional[Dict[str, Any]] = None, annotation_status: str = "complete", author: str = "local", merge: bool = False, table_annotations: Optional[Dict[str, Any]] = None, expected_revision: Optional[int] = None) -> Dict[str, Any]:
+        if expected_revision is not None and (type(expected_revision) is not int or expected_revision < 0):
+            raise ValueError("expected_revision must be a nonnegative integer")
+        if not isinstance(value, dict):
+            raise ValueError("ground truth value must be an object")
         if not self.get_document(document_id):
             raise ValueError("Document not found: {}".format(document_id))
         def write(connection):
             current = connection.execute("SELECT revision, value_json, evidence_json, table_annotations_json FROM ground_truth WHERE document_id = ? ORDER BY revision DESC LIMIT 1", (document_id,)).fetchone()
+            if expected_revision is not None and expected_revision != (int(current["revision"]) if current else 0):
+                raise RevisionConflict("Expected values changed in another session. Reload them and reapply your edits.")
             value_to_save = _merge_dicts(_json(current["value_json"], {}), value) if current and merge else value
             evidence_to_save = _merge_dicts(_json(current["evidence_json"], {}), evidence or {}) if current and merge else evidence or {}
             tables_to_save = _merge_dicts(_json(current["table_annotations_json"], {}), table_annotations or {}) if current and merge else table_annotations or {}
@@ -1050,8 +1093,8 @@ class Database:
             connection.execute("INSERT INTO ground_truth (id, document_id, revision, value_json, evidence_json, table_annotations_json, annotation_status, author, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (ground_truth_id, document_id, revision, _dump(value_to_save), _dump(evidence_to_save), _dump(tables_to_save), annotation_status, author, utc_now()))
             return ground_truth_id
         ground_truth_id = self._transaction(write)
-        result = self.get_ground_truth(document_id) or {}
-        return result
+        row = self._one("SELECT * FROM ground_truth WHERE id = ?", (ground_truth_id,))
+        return self._ground_truth(row)
 
     def create_review_assignment(self, dataset_id: str, document_id: str, reviewer: str = "local", status: str = "queued", note: str = "") -> Dict[str, Any]:
         now = utc_now()

@@ -19,6 +19,7 @@ export function displayValue(value: JsonValue): string {
       : String(value);
 }
 export type Citation = {
+  source?: "model";
   page: number;
   area: { left: number; top: number; width: number; height: number };
 };
@@ -37,6 +38,7 @@ export type Field = {
   page?: number;
 };
 export type Document = {
+  harnessSteps?: import("./harness-trace").HarnessStep[];
   id: string;
   name: string;
   src: string;
@@ -45,6 +47,9 @@ export type Document = {
   status: string;
   fields: Field[];
   groundTruth?: Record<string, JsonValue>;
+  groundTruthRevision?: number;
+  annotationStatus?: string;
+  annotationAuthor?: string;
   sample?: boolean;
   runId?: string;
   warnings?: string[];
@@ -97,6 +102,7 @@ export type Dataset = {
   members?: string[];
 };
 export type Config = {
+  harness?: import("./harness").HarnessConfig;
   modelSettings?: ModelSettings;
   provider: string;
   model: string;
@@ -357,7 +363,7 @@ export type Processor = {
   version: number;
   versionId?: string;
   updatedAt: string;
-  versions: { id: string; version: number; config: Config; date: string }[];
+  versions: { id: string; version: number; config: Config; date: string; author?: string; status?: string }[];
 };
 export const processorStarters: {
   id: string;

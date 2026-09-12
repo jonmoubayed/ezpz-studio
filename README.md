@@ -195,3 +195,9 @@ Upstream license terms and notices remain in effect for third-party code and ass
 - [Geist](licenses/geist.txt) and [Geist Mono](licenses/geist-mono.txt) font licenses
 
 Local adaptations include resolved icon imports, accessible schema controls, preserved schema constraints, citation handling, and locally served PDF engine assets.
+
+## Agent integration (MCP)
+
+Connect Codex, Claude or another local MCP client to the running Studio workspace. Agents can preview imports, inspect processors and datasets, save versioned candidates, evaluate benchmarks, and compose harness recipes. Studio refreshes external changes and rejects conflicting saves. Generated annotations remain unverified until reviewed. Install `.[mcp]` and follow the [MCP setup guide](docs/mcp.md).
+
+The [Harness builder](docs/harnesses.md) supports model tiers, voting, validation, repair, and per-page extraction. Dataset evaluations can pause and resume from saved progress, with execution traces available in Studio and over MCP.

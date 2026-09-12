@@ -275,7 +275,7 @@ def _plugin(parser_ir: DocumentIR, schema: Dict[str, Any], prompt: Dict[str, Any
     raise ValueError("Harness plugin must return HarnessResult, ModelResult, or an output mapping")
 
 
-def run_harness(parser_ir: DocumentIR, schema: Dict[str, Any], prompt: Dict[str, Any], harness_config: Optional[Dict[str, Any]], model: Any, model_factory: ModelFactory, model_config: Optional[Dict[str, Any]] = None) -> HarnessResult:
+def run_harness(parser_ir: DocumentIR, schema: Dict[str, Any], prompt: Dict[str, Any], harness_config: Optional[Dict[str, Any]], model: Any, model_factory: ModelFactory, model_config: Optional[Dict[str, Any]] = None, source_document: Optional[Dict[str, Any]] = None, source_bytes: Optional[bytes] = None) -> HarnessResult:
     config = dict(harness_config or {})
     name = str(config.get("name") or "direct").strip().lower()
     builtins = {"direct": _direct, "parse_extract": _direct, "page_extract": _page_extract, "verify": _verify, "cascade": _cascade, "custom": _plugin}
@@ -285,4 +285,5 @@ def run_harness(parser_ir: DocumentIR, schema: Dict[str, Any], prompt: Dict[str,
             handler = importlib.metadata.entry_points(group="ezpz.harnesses").select(name=name)[0].load()
         except (AttributeError, IndexError, TypeError):
             raise ValueError("Unsupported extraction harness: {}".format(name))
-    return handler(parser_ir=parser_ir, schema=schema, prompt=prompt, harness_config=config, config=config, model=model, model_factory=model_factory, model_config=model_config)
+    source = {"source_document": source_document, "source_bytes": source_bytes} if name == "custom" and source_document is not None else {}
+    return handler(parser_ir=parser_ir, schema=schema, prompt=prompt, harness_config=config, config=config, model=model, model_factory=model_factory, model_config=model_config, **source)

@@ -297,10 +297,11 @@ def score_extraction(
         })
     if scoring_config.get("include_hallucinations"):
         annotated_paths = sorted(set(annotated_paths) | (set(_prediction_paths(predicted_fields)) - set(paths)))
-    if not ground_truth or not annotated_paths:
+    unverified = (ground_truth or {}).get("annotation_status") == "unverified"
+    if unverified or not ground_truth or not annotated_paths:
         return {
             "status": "unscored",
-            "reason": "ground_truth_missing",
+            "reason": "ground_truth_unverified" if unverified else "ground_truth_missing",
             "document_id": extraction.get("document_id"),
             "extraction_id": extraction.get("id"),
             "fields": {},

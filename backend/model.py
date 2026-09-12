@@ -1,11 +1,13 @@
 import json
+import base64
 import os
 import re
 import urllib.error
 import urllib.request
 from typing import Any, Dict, List, Optional
 
-from .confidence import CONFIDENCE_INSTRUCTIONS, mark_model_confidence, response_schema, strict_response_schema
+from .confidence import CONFIDENCE_INSTRUCTIONS, response_schema, strict_response_schema
+from .grounding import GROUNDING_INSTRUCTIONS, model_output, visual_source
 from .adapters import normalize_model_config, normalize_model_provider
 from .model_settings import validate_model_settings
 from .models import DocumentIR, Evidence, ModelResult
@@ -16,22 +18,46 @@ DEFAULT_EXTRACTION_PROMPT = "Extract the requested fields from this document."
 
 
 def extraction_text(schema: Dict[str, Any], prompt: Dict[str, Any], document_ir: DocumentIR) -> str:
-    """Render the shared extraction contract for text-oriented providers."""
+    """Render the extraction contract, including visual evidence for original files."""
     return "{}\n\n{}\n\nResponse schema:\n{}\n\nDocument:\n{}".format(
         prompt.get("extraction") or DEFAULT_EXTRACTION_PROMPT,
-        CONFIDENCE_INSTRUCTIONS,
-        json.dumps(response_schema(schema), ensure_ascii=False),
+        CONFIDENCE_INSTRUCTIONS + ("\n\n" + GROUNDING_INSTRUCTIONS if visual_source(document_ir) else ""),
+        json.dumps(response_schema(schema, include_evidence=visual_source(document_ir)), ensure_ascii=False),
         document_text(document_ir),
     )
 
 
 def document_text(document_ir: DocumentIR) -> str:
+    source = document_ir.metadata.get("source_input")
+    if source:
+        if source["mime_type"].startswith("text/") or source["mime_type"] in ("application/json", "application/xml"):
+            return base64.b64decode(source["data"]).decode("utf-8")
+        return "See the attached original document."
     return "\n".join(
         block.text
         for page in document_ir.pages
         for block in page.blocks
         if block.text
     )
+
+
+def source_content(document_ir: DocumentIR, text: str, provider: str):
+    """Build original-file content without silently substituting parser text."""
+    source = document_ir.metadata.get("source_input")
+    if not source or source["mime_type"].startswith("text/") or source["mime_type"] in ("application/json", "application/xml"):
+        return [{"text": text}] if provider == "gemini" else text
+    mime = source["mime_type"]
+    if mime not in ("application/pdf", "image/png", "image/jpeg", "image/webp", "image/gif"):
+        raise ValueError("Original document input supports PDF, PNG, JPEG, WebP, GIF, and UTF-8 text. Add a Parse block for this file type.")
+    if provider not in ("openai", "anthropic", "gemini"):
+        raise ValueError("This adapter does not support direct PDF/image input. Choose a compatible hosted model or add a Parse block.")
+    if provider == "gemini":
+        return [{"inlineData": {"mimeType": mime, "data": source["data"]}}, {"text": text}]
+    if provider == "anthropic":
+        return [{"type": "document" if mime == "application/pdf" else "image", "source": {"type": "base64", "media_type": mime, "data": source["data"]}}, {"type": "text", "text": text}]
+    url = "data:{};base64,{}".format(mime, source["data"])
+    file_part = {"type": "file", "file": {"filename": source["filename"], "file_data": url}} if mime == "application/pdf" else {"type": "image_url", "image_url": {"url": url}}
+    return [file_part, {"type": "text", "text": text}]
 
 
 def _first_match(patterns: List[str], text: str) -> Optional[str]:
@@ -48,6 +74,7 @@ class DeterministicInvoiceModel:
     provider = "local"
 
     def run(self, document_ir: DocumentIR, schema: Dict[str, Any], prompt: Dict[str, Any]) -> ModelResult:
+        source_content(document_ir, "", "local")
         text = document_text(document_ir)
         invoice_number = _first_match([r"invoice\s*(?:#|number|no\.?)\s*[:#]?\s*([A-Z0-9][A-Z0-9-]+)", r"\b(INV-[A-Z0-9-]+)\b"], text)
         invoice_date = _first_match([r"(?:issued|invoice\s+date|date)\s*[:\-]?\s*(\d{4}-\d{2}-\d{2})"], text)
@@ -116,7 +143,7 @@ class AnthropicModel:
             "model": self.model,
             "max_tokens": int(prompt.get("max_tokens", 4096)),
             "system": prompt.get("system") or DEFAULT_SYSTEM_PROMPT,
-            "messages": [{"role": "user", "content": extraction_text(schema, prompt, document_ir)}],
+            "messages": [{"role": "user", "content": source_content(document_ir, extraction_text(schema, prompt, document_ir), "anthropic")}],
         }
 
         # Current adaptive-thinking Claude models reject custom sampling.
@@ -156,7 +183,7 @@ class AnthropicModel:
                 for item in payload.get("content", [])
                 if item.get("type") == "text"
             )
-            parsed = mark_model_confidence(_parse_json_response(text), schema)
+            parsed = model_output(_parse_json_response(text), schema, document_ir)
             return ModelResult(output=parsed, raw_response=payload, usage=payload.get("usage", {}), warnings=[])
         except (urllib.error.URLError, TimeoutError, ValueError, KeyError) as error:
             raise RuntimeError("{} model request failed or credentials are missing. Check the selected provider and backend credentials; no fallback model was used.".format(self.provider))
@@ -193,14 +220,14 @@ class OpenAICompatibleModel:
         if self.provider == "openai" and prompt.get("structured_outputs"):
             response_format = {
                 "type": "json_schema",
-                "json_schema": {"name": "extraction", "strict": True, "schema": strict_response_schema(response_schema(schema))},
+                "json_schema": {"name": "extraction", "strict": True, "schema": strict_response_schema(response_schema(schema, include_evidence=visual_source(document_ir)))},
             }
         message: Dict[str, Any] = {
             "model": self.model,
             "response_format": response_format,
             "messages": [
                 {"role": "system", "content": prompt.get("system") or DEFAULT_SYSTEM_PROMPT},
-                {"role": "user", "content": extraction_text(schema, prompt, document_ir)},
+                {"role": "user", "content": source_content(document_ir, extraction_text(schema, prompt, document_ir), self.provider)},
             ],
         }
         if not caps["sampling"]:
@@ -237,7 +264,7 @@ class OpenAICompatibleModel:
             text = payload["choices"][0]["message"]["content"]
             if isinstance(text, list):
                 text = "".join(item.get("text", "") for item in text if isinstance(item, dict))
-            parsed = mark_model_confidence(_parse_json_response(text), schema)
+            parsed = model_output(_parse_json_response(text), schema, document_ir)
             usage = payload.get("usage", {})
             return ModelResult(
                 output=parsed,
@@ -262,7 +289,7 @@ class GeminiModel:
         caps = validate_model_settings(self.provider, self.model, prompt)
         return {
             "systemInstruction": {"parts": [{"text": prompt.get("system") or DEFAULT_SYSTEM_PROMPT}]},
-            "contents": [{"role": "user", "parts": [{"text": extraction_text(schema, prompt, document_ir)}]}],
+            "contents": [{"role": "user", "parts": source_content(document_ir, extraction_text(schema, prompt, document_ir), "gemini")}],
             "generationConfig": {
                 "temperature": float(prompt.get("temperature", 0)),
                 "maxOutputTokens": int(prompt.get("max_tokens", 4096)),
@@ -270,7 +297,7 @@ class GeminiModel:
                 **({"topP": prompt["top_p"]} if "top_p" in prompt else {}),
                 **({"thinkingConfig": {"thinkingLevel": prompt["reasoning_effort"].upper()}} if prompt.get("reasoning_effort") else {}),
                 **({"thinkingConfig": {"thinkingBudget": prompt["thinking_budget"]}} if "thinking_budget" in prompt else {}),
-                **({"responseJsonSchema": response_schema(schema)} if prompt.get("structured_outputs") else {}),
+                **({"responseJsonSchema": response_schema(schema, include_evidence=visual_source(document_ir))} if prompt.get("structured_outputs") else {}),
             },
         }
 
@@ -289,7 +316,7 @@ class GeminiModel:
             with urllib.request.urlopen(request, timeout=60) as response:
                 payload = json.loads(response.read().decode("utf-8"))
             text = "".join(part.get("text", "") for part in payload["candidates"][0]["content"]["parts"])
-            parsed = mark_model_confidence(_parse_json_response(text), schema)
+            parsed = model_output(_parse_json_response(text), schema, document_ir)
             usage = payload.get("usageMetadata", {})
             return ModelResult(
                 output=parsed,

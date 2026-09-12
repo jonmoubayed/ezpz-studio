@@ -10,9 +10,12 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .costing import estimate_cost
 from .confidence import CONTRACT_VERSION, valid_confidence
+from .grounding import valid_region
 from .db import Database
 from .evaluation import aggregate_evaluations, score_extraction
 from .harness import run_harness
+from .harness_runtime import execute_harness, saved_latency_ms
+from .resumable import EvaluationRecovery, EvaluationInterrupted
 from .model import create_model_adapter
 from .models import CanonicalResult, DocumentIR, Evidence, FieldResult, new_id
 from .parser import parse_document
@@ -153,30 +156,19 @@ def canonicalize(
         raw = _get_path(output, path)
         value, confidence, raw_evidence, errors = _unwrap_value(raw)
         evidence = []
-        for item in raw_evidence:
+        for item in raw_evidence if isinstance(raw_evidence, list) else []:
             if isinstance(item, Evidence):
-                evidence.append(item)
-            elif isinstance(item, dict):
-                raw_bbox = item.get("bbox")
-                if not isinstance(raw_bbox, (list, tuple)) or len(raw_bbox) < 4:
-                    continue
-                try:
-                    bbox = [float(point) for point in raw_bbox[:4]]
-                except (TypeError, ValueError):
-                    continue
-                metadata = dict(item.get("metadata") or {})
-                for key in ("bbox_source", "grounding", "source_index"):
-                    if key in item and key not in metadata:
-                        metadata[key] = item[key]
-                evidence.append(
-                    Evidence(
-                        page=int(item.get("page", 1)),
-                        bbox=bbox,
-                        text=str(item.get("text", "")),
-                        block_id=item.get("block_id"),
-                        metadata=metadata,
-                    )
-                )
+                item = item.to_dict()
+            if not isinstance(item, dict):
+                continue
+            region = valid_region(item, parser_ir.metadata.get("page_count"))
+            if not region:
+                continue
+            metadata = dict(item["metadata"]) if isinstance(item.get("metadata"), dict) else {}
+            for key in ("bbox_source", "grounding", "source_index"):
+                if key in item and key not in metadata:
+                    metadata[key] = item[key]
+            evidence.append(Evidence(**region, block_id=item.get("block_id"), metadata=metadata))
         if not evidence:
             evidence = _evidence_for_value(parser_ir, value)
         fields[path] = FieldResult(
@@ -187,7 +179,9 @@ def canonicalize(
             errors=errors,
             provenance={
                 "processor_version_id": processor_version["id"],
-                "model": model_name,
+                "model": (raw.get("harness_provenance", {}).get("model") if isinstance(raw, dict) else None) or model_name,
+                "harness": raw.get("harness_provenance") if isinstance(raw, dict) else None,
+                "selection": raw.get("selection") if isinstance(raw, dict) else None,
                 "confidence_source": raw.get("confidence_source") if isinstance(raw, dict) and confidence is not None else None,
                 "parser": parser_ir.parser,
             },
@@ -210,6 +204,7 @@ class ExtractionService:
         self.database = database
         self.blobs = blobs
         self.background_slots = threading.BoundedSemaphore(1)
+        self.recovery = EvaluationRecovery(self)
 
     def extract_document(
         self,
@@ -247,6 +242,16 @@ class ExtractionService:
         if not run:
             raise ValueError("Run not found: {}".format(run_id))
         active_run_id = run["id"]
+        if persist and not owns_run:
+            # Result and evaluation commit together. Recover a commit whose worker
+            # stopped before acknowledging the document in the coordinator.
+            existing = next((e for e in self.database.list_extractions(active_run_id)
+                             if e["document_id"] == document_id and e.get("evaluation")), None)
+            if existing:
+                existing["run"] = run
+                existing["document"] = document
+                self._decorate_response(existing, processor_ref)
+                return existing
         started = time.perf_counter()
         cache_enabled = persist and processor_version_override is None and processor_version.get("cache", True) is not False
         cache_key = self._cache_key(document, processor_version) if cache_enabled else None
@@ -271,11 +276,12 @@ class ExtractionService:
                     "cache_hit": True,
                     "warnings": cached.get("warnings", []),
                 }
-                extraction = self.database.insert_extraction(extraction_payload)
-                self.database.insert_extraction_fields(extraction_payload["id"], (cached["result"].get("fields") or {}))
-                extraction = self.database.get_extraction(extraction_payload["id"]) or extraction
-                evaluation = self._persist_evaluation(extraction, processor_version, active_run_id, scoring_config)
-                extraction = self.database.get_extraction(extraction_payload["id"]) or extraction
+                with self.database.atomic():
+                    extraction = self.database.insert_extraction(extraction_payload)
+                    self.database.insert_extraction_fields(extraction_payload["id"], (cached["result"].get("fields") or {}))
+                    extraction = self.database.get_extraction(extraction_payload["id"]) or extraction
+                    evaluation = self._persist_evaluation(extraction, processor_version, active_run_id, scoring_config)
+                    extraction = self.database.get_extraction(extraction_payload["id"]) or extraction
                 metrics = {"documents": 1, "completed": 1, "failed": 0, "cache_hits": 1, "cache_misses": 0, "latency_ms": latency_ms, "cost_usd": extraction["cost_usd"]}
                 metrics.update(evaluation.get("metrics", {}))
                 if owns_run and persist:
@@ -286,21 +292,22 @@ class ExtractionService:
                 return extraction
 
             data = self.blobs.get(document["blob_key"])
-            parser_started = time.perf_counter()
-            parser_ir = parse_document(document, data, processor_version.get("parser", {}))
-            parser_latency_ms = int((time.perf_counter() - parser_started) * 1000)
-            model = self._model(processor_version)
             model_started = time.perf_counter()
-            harness_result = run_harness(
-                parser_ir,
-                processor_version.get("schema", {}),
-                processor_version.get("prompt", {}),
-                processor_version.get("harness", {}),
-                model,
-                self._model_from_config,
-                processor_version.get("model", {}),
-            )
-            model_latency_ms = int((time.perf_counter() - model_started) * 1000)
+            import tempfile
+            from pathlib import Path
+            from contextlib import nullcontext
+            execution_id = active_run_id + ":" + document_id
+            saved_directory = self.database.path.parent / "harness-state" / hashlib.sha256(execution_id.encode()).hexdigest()
+            with (nullcontext(str(saved_directory)) if persist else tempfile.TemporaryDirectory()) as execution_directory:
+                parser_ir, harness_result = execute_harness(
+                    document, data, processor_version,
+                    lambda model_config: self._model(processor_version) if model_config == processor_version.get("model") else self._model_from_config(model_config),
+                    Path(execution_directory), execution_id,
+                    (lambda: self.recovery.check(active_run_id)) if persist and not owns_run else None,
+                )
+            parser_latency_ms = saved_latency_ms(harness_result.steps, {"parse"})
+            model_latency_ms = saved_latency_ms(harness_result.steps, {"extract", "plugin"})
+            model = self._model(processor_version)
             canonical = canonicalize(
                 harness_result.output,
                 processor_version.get("schema", {}),
@@ -310,7 +317,7 @@ class ExtractionService:
             )
             canonical.provenance["harness_steps"] = harness_result.steps
             canonical.warnings.extend(harness_result.warnings)
-            latency_ms = int((time.perf_counter() - started) * 1000)
+            latency_ms = max(int((time.perf_counter() - started) * 1000), saved_latency_ms(harness_result.steps))
             extraction_id = new_id("ext")
             extraction_payload = {
                 "id": extraction_id,
@@ -331,11 +338,12 @@ class ExtractionService:
             }
             field_payload = {path: field.to_dict() for path, field in canonical.fields.items()}
             if persist:
-                extraction = self.database.insert_extraction(extraction_payload)
-                self.database.insert_extraction_fields(extraction_id, field_payload)
-                extraction = self.database.get_extraction(extraction_id) or extraction
-                evaluation = self._persist_evaluation(extraction, processor_version, active_run_id, scoring_config)
-                extraction = self.database.get_extraction(extraction_id) or extraction
+                with self.database.atomic():
+                    extraction = self.database.insert_extraction(extraction_payload)
+                    self.database.insert_extraction_fields(extraction_id, field_payload)
+                    extraction = self.database.get_extraction(extraction_id) or extraction
+                    evaluation = self._persist_evaluation(extraction, processor_version, active_run_id, scoring_config)
+                    extraction = self.database.get_extraction(extraction_id) or extraction
                 if cache_key:
                     self.database.put_extraction_cache(cache_key, document["sha256"], processor_version["id"], extraction_payload)
             else:
@@ -427,6 +435,8 @@ class ExtractionService:
         force_refresh: bool = True,
         eval_experiment_id: Optional[str] = None,
         background: bool = False,
+        frozen_benchmark: Optional[Dict[str, Any]] = None,
+        on_created=None,
     ) -> Dict[str, Any]:
         processor_version = self._resolve_processor_version(processor_ref, version)
         if not processor_version:
@@ -451,7 +461,15 @@ class ExtractionService:
         version = processor_version["version"]
         if document_ids is not None and not isinstance(document_ids, (list, tuple, set)):
             raise ValueError("document_ids must be a list")
-        documents = self.database.snapshot_dataset(dataset_id, document_ids)
+        if frozen_benchmark is None:
+            documents = self.database.snapshot_dataset(dataset_id, document_ids)
+        else:
+            documents = []
+            for saved in frozen_benchmark["documents"]:
+                document = self.database.get_document(saved["id"])
+                if not document or document.get("sha256") != saved.get("sha256"):
+                    raise ValueError("A frozen benchmark document was removed or changed. Stop and establish a new baseline.")
+                documents.append({**document, "ground_truth": deepcopy(saved.get("ground_truth"))})
         if not documents:
             raise ValueError("Add documents to the benchmark before running an evaluation")
         benchmark = [{"id": d["id"], "sha256": d.get("sha256"), "name": d.get("filename"), "ground_truth": d.get("ground_truth")} for d in documents]
@@ -460,6 +478,10 @@ class ExtractionService:
         run_metadata["cache_mode"] = "bypass" if force_refresh else "prefer"
         run_metadata["fresh_extraction"] = bool(force_refresh)
         run_metadata["benchmark_snapshot"] = {"documents": benchmark, "fingerprint": hashlib.sha256(json.dumps(fingerprint, sort_keys=True, separators=(",", ":")).encode()).hexdigest()}
+        if frozen_benchmark is not None:
+            if run_metadata["benchmark_snapshot"]["fingerprint"] != frozen_benchmark["fingerprint"]:
+                raise ValueError("Frozen benchmark fingerprint does not match its documents")
+            run_metadata["benchmark_snapshot"] = deepcopy(frozen_benchmark)
         if background and not self.background_slots.acquire(blocking=False):
             raise ValueError("An evaluation is already running. Wait for it to finish or cancel it before starting another.")
         try:
@@ -472,33 +494,30 @@ class ExtractionService:
                 metadata=run_metadata,
             )
             self.database.update_run_progress(run["id"], {"documents": len(documents), "completed": 0, "failed": 0})
+            if on_created:
+                on_created(run)
         except Exception:
             if background:
                 self.background_slots.release()
             raise
-        if background:
-            def execute():
-                try:
-                    self._execute_dataset_run(run, documents, processor_ref, version, scoring_config, force_refresh)
-                except Exception as error:
-                    self.database.finish_run(run["id"], "failed", error_text=str(error))
-                finally:
-                    self.background_slots.release()
-            threading.Thread(target=execute, daemon=True, name="ezpz-evaluation").start()
-            return {"run": self.database.get_run(run["id"]), "results": [], "failures": []}
-        return self._execute_dataset_run(run, documents, processor_ref, version, scoring_config, force_refresh)
+        return self.recovery.dispatch(run, documents, processor_ref, version, scoring_config, force_refresh, background)
 
     def _execute_dataset_run(self, run, documents, processor_ref, version, scoring_config, force_refresh):
-        results = []
-        failures = []
-        total_cost = 0.0
-        total_latency = 0
+        # Reconstruct progress from durable results; never depend on a surviving worker.
+        outcomes = self.recovery.outcomes(run["id"])
+        results = [result for result in self.database.list_extractions(run["id"])
+                   if outcomes.get(result["document_id"], {}).get("status") == "completed"]
+        failures = [{"document_id": key, "error": value["error"]} for key, value in outcomes.items() if value["status"] == "failed"]
+        total_cost = sum(float(result.get("cost_usd") or 0) for result in results)
+        total_latency = sum(int(result.get("latency_ms") or 0) for result in results)
+        interrupted = None
         cancelled = False
         for document in documents:
-            if self.database.get_run(run["id"])["status"] == "cancelling":
-                cancelled = True
-                break
+            if outcomes.get(document["id"], {}).get("status") in ("completed", "failed"):
+                continue
             try:
+                self.recovery.check(run["id"])
+                self.recovery.outcome(run["id"], document["id"], "running")
                 result = self.extract_document(
                     document["id"],
                     processor_ref=processor_ref,
@@ -507,10 +526,15 @@ class ExtractionService:
                     scoring_config=scoring_config,
                     force_refresh=force_refresh,
                 )
+                self.recovery.outcome(run["id"], document["id"], "completed")
                 results.append(result)
                 total_cost += float(result.get("cost_usd", 0))
                 total_latency += int(result.get("latency_ms", 0))
+            except (EvaluationInterrupted, ConnectionError, TimeoutError) as error:
+                interrupted = self.recovery.interrupted_status(run["id"], error)
+                break
             except Exception as error:
+                self.recovery.outcome(run["id"], document["id"], "failed", str(error))
                 failures.append({"document_id": document["id"], "error": str(error)})
             self.database.update_run_progress(run["id"], {"documents": len(documents), "completed": len(results), "failed": len(failures), "failures": failures})
         metrics = {
@@ -535,7 +559,11 @@ class ExtractionService:
         metrics["cost_per_correct_document"] = round(total_cost / max(1, int((metrics.get("document_accuracy") or 0) * int(metrics.get("scored_documents") or 0))), 8) if metrics.get("document_accuracy") is not None and metrics.get("scored_documents") else None
         metrics["failures"] = failures
         status = "cancelled" if cancelled or self.database.get_run(run["id"])["status"] == "cancelling" else ("completed" if not failures else "completed_with_failures" if results else "failed")
-        final_run = self.database.finish_run(run["id"], status, metrics)
+        if interrupted:
+            self.database._execute("UPDATE runs SET metrics_json = ? WHERE id = ?", (json.dumps(metrics), run["id"]))
+            final_run = self.database.get_run(run["id"])
+        else:
+            final_run = self.database.finish_run(run["id"], status, metrics)
         return {"run": final_run, "results": results, "failures": failures}
 
     def _persist_evaluation(

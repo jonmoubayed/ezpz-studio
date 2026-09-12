@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { access, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import net from "node:net";
@@ -13,8 +13,13 @@ async function freePort() {
 }
 const port = await freePort();
 const backend = path.resolve(process.env.EZPZ_BACKEND_REPO || ".");
+let python = process.env.EZPZ_TEST_PYTHON || "python3";
+if (!process.env.EZPZ_TEST_PYTHON) {
+  const localPython = path.join(backend, process.platform === "win32" ? ".venv/Scripts/python.exe" : ".venv/bin/python");
+  try { await access(localPython); python = localPython; } catch {}
+}
 const server = spawn(
-  process.env.EZPZ_TEST_PYTHON || "python3",
+  python,
   ["-m", "backend.server", "--root", root, "--port", String(port)],
   {
     env: {
@@ -68,14 +73,14 @@ async function stop(child) {
 }
 try {
   await waitFor(`http://127.0.0.1:${port}/v1/ready`);
-  if (process.argv.includes("--browser")) {
+  if (process.argv.includes("--browser") || process.argv.includes("--harness") || process.argv.includes("--mcp-browser")) {
     const browserPort = await freePort();
     const browserUrl = `http://127.0.0.1:${browserPort}`;
     preview = spawn(
       process.execPath,
       [
         "node_modules/vite/bin/vite.js",
-        "preview",
+        ...(process.argv.includes("--harness") ? [] : ["preview"]),
         "--host",
         "127.0.0.1",
         "--port",
@@ -89,7 +94,7 @@ try {
     );
     preview.stderr.on("data", (d) => (serverErrors += d));
     await waitFor(`${browserUrl}/v1/ready`);
-    await run("tests/browser.integration.ts", {
+    await run(process.argv.includes("--mcp-browser") ? "tests/mcp.browser.ts" : process.argv.includes("--harness") ? "tests/harness.browser.ts" : "tests/browser.integration.ts", {
       STUDIO_BROWSER_URL: browserUrl,
       STUDIO_TEST_DISPOSABLE: "1",
     });

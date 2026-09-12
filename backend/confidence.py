@@ -3,7 +3,7 @@ from copy import deepcopy
 import math
 from typing import Any, Dict, Optional
 
-CONTRACT_VERSION = "field-confidence-v1"
+CONTRACT_VERSION = "field-confidence-evidence-v2"
 CONFIDENCE_INSTRUCTIONS = (
     "Return JSON matching the response schema below. For every extraction leaf, return "
     "{\"value\": <extracted value>, \"confidence\": <number from 0 to 1 or null>}. "
@@ -22,14 +22,14 @@ def valid_confidence(value: Any) -> Optional[float]:
     return float(value) if math.isfinite(value) and 0 <= value <= 1 else None
 
 
-def response_schema(schema: Dict[str, Any]) -> Dict[str, Any]:
+def response_schema(schema: Dict[str, Any], include_evidence: bool = False) -> Dict[str, Any]:
     """Wrap the same leaves canonicalization scores; keep user extraction schema untouched."""
     if schema.get("type") == "object":
-        properties = {key: response_schema(value) for key, value in schema.get("properties", {}).items()}
+        properties = {key: response_schema(value, include_evidence) for key, value in schema.get("properties", {}).items()}
         return {**{key: deepcopy(schema[key]) for key in ("$defs", "definitions", "description") if key in schema},
                 "type": "object", "properties": properties,
                 "required": list(properties), "additionalProperties": False}
-    return {
+    wrapped = {
         "type": "object", "additionalProperties": False,
         "properties": {
             "value": {"anyOf": [deepcopy(schema), {"type": "null"}]},
@@ -38,6 +38,25 @@ def response_schema(schema: Dict[str, Any]) -> Dict[str, Any]:
         },
         "required": ["value", "confidence"],
     }
+
+    if include_evidence:
+        wrapped["properties"]["evidence"] = {
+            "type": "array",
+            "description": "Visible source regions supporting this field; empty when not locatable.",
+            "items": {
+                "type": "object", "additionalProperties": False,
+                "properties": {
+                    "page": {"type": "integer", "minimum": 1, "description": "1-based physical page number."},
+                    "bbox": {"type": "array", "minItems": 4, "maxItems": 4,
+                             "items": {"type": "number", "minimum": 0, "maximum": 1},
+                             "description": "[left, top, right, bottom], normalized to [0,1], top-left origin."},
+                    "text": {"type": "string", "description": "Verbatim text visible inside this region."},
+                },
+                "required": ["page", "bbox", "text"],
+            },
+        }
+        wrapped["required"].append("evidence")
+    return wrapped
 
 
 def mark_model_confidence(output: Any, schema: Dict[str, Any]) -> Any:

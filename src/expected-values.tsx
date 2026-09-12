@@ -52,6 +52,8 @@ export function ExpectedValuesEditor({
   const [raw, setRaw] = useState(() =>
     JSON.stringify(expectedValues(document), null, 2),
   );
+  const [revision, setRevision] = useState<number>();
+  const [provenance, setProvenance] = useState<{ author?: string; status?: string }>({});
   const [loading, setLoading] = useState(s.mode === "live");
   const [loadError, setLoadError] = useState("");
   const [attempt, setAttempt] = useState(0);
@@ -84,6 +86,8 @@ export function ExpectedValuesEditor({
       .then((data) => {
         if (abort.signal.aborted) return;
         const values = data.ground_truth?.value || {};
+        setRevision(data.ground_truth?.revision || 0);
+        setProvenance({ author: data.ground_truth?.author, status: data.ground_truth?.annotation_status });
         setRaw(JSON.stringify(values, null, 2));
         s.updateExpectedValues(document.id, values);
       })
@@ -126,7 +130,11 @@ export function ExpectedValuesEditor({
             : { id: datasetId }
           : undefined;
       setPending(scope);
-      const result = await s.saveExpectedValues(document, value, target);
+      const result = await s.saveExpectedValues(document, value, target, revision);
+      if (result.groundTruthRevision !== undefined) {
+        setRevision(result.groundTruthRevision);
+        setProvenance({ author: "local", status: "complete" });
+      }
       if (result.dataset) {
         setDatasetId(result.dataset.id);
         setName("");
@@ -172,6 +180,9 @@ export function ExpectedValuesEditor({
         Define the correct values from {document.name}. These become its ground
         truth for future evaluations.
       </p>
+      {provenance.status === "unverified" && <p role="status">Unverified annotations from {provenance.author || "an agent"}. These are excluded from evaluation scores. Check the source before saving as ground truth.</p>}
+      {provenance.author && provenance.status !== "unverified" && <p>Last saved by {provenance.author}.</p>}
+      {revision !== undefined && document.groundTruthRevision !== undefined && revision !== document.groundTruthRevision && <p role="status">Expected values changed in another session. Your edits are preserved; reload the saved values to reconcile them.</p>}
       {loading ? (
         <Busy label="Loading expected values…" />
       ) : loadError ? (
@@ -199,6 +210,7 @@ export function ExpectedValuesEditor({
             />
           </label>
           <div className="expected-actions">
+            <Button disabled={disabled} onClick={() => setAttempt(a => a + 1)}>Reload saved values</Button>
             <Button
               disabled={disabled || !document.fields.length}
               onClick={() => {

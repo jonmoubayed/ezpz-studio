@@ -95,7 +95,8 @@ export function extractionCitations(
       Math.max(0, Math.min(1, v)),
     );
     if (right <= left || bottom <= top) continue;
-    const citation = {
+    const citation: Citation = {
+      ...(item.metadata?.bbox_source === "model" ? { source: "model" as const } : {}),
       page: pageNumber,
       area: {
         left: left * 100,
