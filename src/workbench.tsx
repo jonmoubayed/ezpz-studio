@@ -1,3 +1,5 @@
+import { extractionValues, fieldTree } from "./extraction-output";
+import { ExtractionFields } from "./extraction-fields";
 import { StructuredValue, isObjectArray } from "./structured-value";
 import { isLowConfidence } from "./confidence";
 import { ExpectedValuesEditor, FieldValues } from "./expected-values";
@@ -388,7 +390,7 @@ export function Playground() {
   const [groundTruthOpen, setGroundTruthOpen] = useState(false);
   const d = s.selected;
   const field = d?.fields.find((f) => f.key === active);
-  const json = Object.fromEntries(d?.fields.map((f) => [f.key, f.value]) || []);
+  const json = extractionValues(d?.fields || []);
   return (
     <>
       <Heading
@@ -457,7 +459,7 @@ export function Playground() {
                   onClick={() => setTab(t)}
                 >
                   {t}
-                  {t === "Fields" && <span>{d.fields.length}</span>}
+                  {t === "Fields" && <span>{fieldTree(d.fields).length}</span>}
                 </button>
               ))}
             </div>
@@ -468,11 +470,11 @@ export function Playground() {
                     <i />
                     {d.fields.length ? "Extraction ready" : "Ready to extract"}
                   </span>
-                  <Badge>{d.fields.length} fields</Badge>
+                  <Badge>{fieldTree(d.fields).length} fields</Badge>
                 </div>
                 {d.fields.length ? (
                   <div className="field-list">
-                    {d.fields.map((f) => (
+                    <ExtractionFields fields={d.fields} renderField={(f, name) => (
                       <article
                         key={f.key}
                         className={`field-card ${active === f.key ? "selected" : ""} ${isLowConfidence(f) ? "uncertain" : ""}`}
@@ -488,7 +490,7 @@ export function Playground() {
                             <span>
                               {typeof f.value === "number" ? "#" : "Aa"}
                             </span>
-                            {f.key}
+                            {name}
                           </span>
                           <ConfidenceBadge field={f} />
                         </button>
@@ -508,7 +510,7 @@ export function Playground() {
                           )}
                         </small>
                       </article>
-                    ))}
+                    )} />
                   </div>
                 ) : (
                   <Empty
