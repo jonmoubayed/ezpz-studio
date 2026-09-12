@@ -1,6 +1,7 @@
 name: Build and verify Studio
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
   workflow_call:
@@ -86,6 +87,8 @@ jobs:
           PY
       - name: Build packaged frontend, wheel, and source archive
         run: python scripts/build-package.py
+      - name: Test wheel startup checks
+        run: python -m unittest discover -s scripts/tests -p 'test_*.py'
       - name: Test packaged frontend
         run: npm test
       - name: Record build provenance and checksums

@@ -18,6 +18,36 @@ from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, Request, build_opener
 
 
+def start_studio(cli, root, env, log, timeout=120):
+    """Include cold Python imports in a bounded startup deadline, with diagnostics."""
+    started = time.monotonic()
+    process = subprocess.Popen([str(cli), "studio", "--no-open", "--port", "0"],
+                               cwd=root, env=env, stdout=log, stderr=log)
+    try:
+        while True:
+            log.flush()
+            content = Path(log.name).read_text(errors="replace")
+            code = process.poll()
+            if code is not None:
+                raise AssertionError(f"Packaged launcher exited with status {code}:\n{content}")
+            match = re.search(r"Studio is ready at (http://127\.0\.0\.1:\d+)/", content)
+            if match:
+                print(f"Installed Studio ready after {time.monotonic() - started:.1f}s", flush=True)
+                return process, match[1]
+            if time.monotonic() - started >= timeout:
+                raise AssertionError(f"Packaged launcher did not become ready within {timeout}s. Import/startup log:\n{content}")
+            time.sleep(0.1)
+    except BaseException:
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+        raise
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("wheel", type=Path)
@@ -44,7 +74,8 @@ def main():
         env.update({"EZPZ_WORKSPACE": str(root / "saved-workspace"), "EZPZ_SEED_DEMO": "false"})
         install = [str(python), "-m", "pip", "install", "--disable-pip-version-check"]
         subprocess.run(install + [str(wheel)], cwd=root, env=env, check=True)
-        runtime_env = {**env, "PATH": str(bin_dir)}
+        runtime_env = {**env, "PATH": str(bin_dir), "PYTHONUNBUFFERED": "1",
+                       "PYTHONPROFILEIMPORTTIME": "1"}
         assert shutil.which("node", path=runtime_env["PATH"]) is None
         assert shutil.which("docker", path=runtime_env["PATH"]) is None
 
@@ -55,20 +86,7 @@ def main():
                 return json.load(response)
 
         def start(log):
-            process = subprocess.Popen([str(cli), "studio", "--no-open", "--port", "0"],
-                                       cwd=root, env=runtime_env, stdout=log, stderr=log)
-            for _ in range(150):
-                log.flush()
-                content = Path(log.name).read_text(errors="replace")
-                match = re.search(r"Studio is ready at (http://127\.0\.0\.1:\d+)/", content)
-                if match:
-                    return process, match[1]
-                if process.poll() is not None:
-                    raise AssertionError(content)
-                time.sleep(0.1)
-            process.terminate()
-            process.wait(timeout=15)
-            raise AssertionError("Packaged launcher never became ready: " + content)
+            return start_studio(cli, root, runtime_env, log)
 
         def stop(process):
             process.terminate()
