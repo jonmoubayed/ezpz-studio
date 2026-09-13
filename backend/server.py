@@ -7,6 +7,7 @@ import ipaddress
 import json
 import mimetypes
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -1068,6 +1069,9 @@ def main() -> None:
     parser.add_argument("--root", type=Path, default=default_runtime_root())
     parser.add_argument("--static-root", type=Path, help="serve a developer-built frontend directory")
     args = parser.parse_args()
+    # The development supervisor uses CTRL_BREAK for graceful Windows reloads.
+    if hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, signal.default_int_handler)
     server = make_server(args.root, args.host, args.port, static_root=args.static_root)
     print("ezpz running at http://{}:{}/".format(args.host, args.port))
     try:

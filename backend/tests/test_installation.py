@@ -54,6 +54,7 @@ class InstallationTests(unittest.TestCase):
             assets = root / "ui"
             assets.mkdir()
             (assets / "index.html").write_text("<h1>Live Studio</h1>")
+            (assets / "license copy.txt").write_text("License notice")
             workspace = root / "workspace"
             workspace.mkdir()
             (workspace / "private.txt").write_text("not a static asset")
@@ -64,7 +65,10 @@ class InstallationTests(unittest.TestCase):
             try:
                 with urlopen(base + "/") as response:
                     self.assertIn(b"Live Studio", response.read())
-                for path in ["/private.txt", "/../workspace/private.txt", "/.ezpz/ezpz.db"]:
+                with urlopen(base + "/license%20copy.txt") as response:
+                    self.assertEqual(response.read(), b"License notice")
+                for path in ["/private.txt", "/../workspace/private.txt", "/.ezpz/ezpz.db",
+                             "/%2e%2e/workspace/private.txt", "/%2eezpz/ezpz.db"]:
                     with self.subTest(path=path), self.assertRaises(HTTPError) as error:
                         urlopen(base + path)
                     self.assertIn(error.exception.code, [403, 404])

@@ -10,6 +10,10 @@ For a substantial feature or an API contract change, open an issue explaining th
 
 ## Development workflow
 
+After installing Python requirements and running `npm ci`, use
+`.venv/bin/python scripts/dev.py` for frontend hot reload and automatic API
+restarts. No wheel rebuild is needed. See [development and deployment](docs/development.md).
+
 1. Create a branch for one coherent change.
 2. Reproduce the problem with a synthetic document or a small fixture.
 3. Make the change using the existing styles and shared controls.

@@ -15,6 +15,7 @@ import venv
 import zipfile
 from pathlib import Path
 from urllib.error import HTTPError, URLError
+from urllib.parse import quote
 from urllib.request import ProxyHandler, Request, build_opener
 
 
@@ -117,7 +118,7 @@ def main():
                 assert manifest["application"] == "ezpz-live-studio"
                 assert "vendor/pdfium.wasm" in manifest["files"]
                 for name, checksum in manifest["files"].items():
-                    with opener.open(base + "/" + name) as response:
+                    with opener.open(base + "/" + quote(name, safe="/")) as response:
                         assert hashlib.sha256(response.read()).hexdigest() == checksum, name
                 # Actual multipart upload, annotation, processor, and evaluation; no hosted model calls.
                 document_bytes = b"Invoice # INV-1042\nTotal due $80.00\nCurrency USD\n"
