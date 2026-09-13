@@ -77,6 +77,11 @@ move data between a Docker volume and a host workspace.
 
 ## Combined Studio 0.1.4
 
+Studio 0.1.5 also separates structured extraction evidence from reference answers.
+Unannotated `excerpt` and `location` leaves appear as expandable source evidence,
+while raw JSON exports retain every leaf. Reviewed null answers display as
+“Not found in source,” and unresolved reference conflicts have a distinct label.
+
 The release builds the canonical `src/` frontend and `backend/` together. It includes
 workspace switching, provider-key settings, the focused Hill climbing screen,
 automatic optimization, the visual Harness editor, saved execution traces,

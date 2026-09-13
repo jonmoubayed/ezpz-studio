@@ -1,5 +1,5 @@
 import { Fragment, type ReactNode } from "react";
-import { fieldTree, type FieldNode } from "./extraction-output";
+import { answerFields, fieldTree, type FieldNode } from "./extraction-output";
 
 export function ExtractionFields<T extends { key: string }>({
   fields,
@@ -21,5 +21,5 @@ export function ExtractionFields<T extends { key: string }>({
       <Fragment key={node.path}>{renderField(node.field!, node.name)}</Fragment>
     ));
   }
-  return <>{render(fieldTree(fields))}</>;
+  return <>{render(fieldTree(answerFields(fields)))}</>;
 }

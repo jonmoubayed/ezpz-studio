@@ -7,6 +7,7 @@ import { CredentialSettings } from "./credential-settings";
 import { settingsAfterModelChange } from "./model-settings";
 import { ModelPicker, builtinModels } from "./model-picker";
 import { isLowConfidence } from "./confidence";
+import { answerFields } from "./extraction-output";
 import { FieldSelect } from "./components/field-select";
 import { useEffect, useState } from "react";
 import {
@@ -209,7 +210,7 @@ export function Overview() {
   const low = s.reviewDocuments
     .filter((d) => s.mode === "demo" || d.runId)
     .flatMap((d) =>
-      d.fields.filter(
+      answerFields(d.fields).filter(
         (f) =>
           (isLowConfidence(f) ||
             (f.status && !["correct", "unscored"].includes(f.status))) &&

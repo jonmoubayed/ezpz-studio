@@ -2,7 +2,7 @@ import { workspaceUrl } from "./workspace-context";
 import { readModelSettings, settingsPrompt } from "./model-settings.ts";
 import { confidenceFromResponse } from "./confidence";
 import { harnessError } from "./harness";
-import { expectedValue, extractionCitations } from "./result-model";
+import { expectedValue, expectedStatus, extractionCitations } from "./result-model";
 import type {
   Config,
   Dataset,
@@ -124,6 +124,7 @@ export function extractionFields(e: any, groundTruth?: any): Field[] {
         key,
         value: v?.value ?? null,
         ...expectedValue(groundTruth?.value, key),
+        expectedStatus: expectedStatus(groundTruth?.value, key),
         ...confidenceFromResponse(v),
         citations,
         ...(typeof excerpt === "string" && excerpt.trim()

@@ -10,7 +10,8 @@ import { equalValues, expectedValues, hasExpected } from "./result-model";
 
 export function FieldValues({ field }: { field: Field }) {
   const annotated = hasExpected(field);
-  const match = annotated && equalValues(field.value, field.expected);
+  const match = annotated && (equalValues(field.value, field.expected) ||
+    (field.expected === null && field.value === ""));
   return (
     <>
       <div
@@ -22,14 +23,7 @@ export function FieldValues({ field }: { field: Field }) {
         </div>
         <div>
           <small>EXPECTED</small>
-          {annotated ? (
-            <StructuredValue
-              value={field.expected}
-              label={`${field.key} expected`}
-            />
-          ) : (
-            <code>Not annotated</code>
-          )}
+          <ExpectedFieldValue field={field} />
         </div>
       </div>
       {annotated && (
@@ -37,8 +31,21 @@ export function FieldValues({ field }: { field: Field }) {
           {match ? "Matches expected" : "Different from expected"}
         </span>
       )}
+      {field.key.endsWith(".value") && field.sourceExcerpt && (
+        <details className="field-source-evidence">
+          <summary>Source evidence</summary>
+          {field.sourceLocation && <small>{field.sourceLocation}</small>}
+          <blockquote>{field.sourceExcerpt}</blockquote>
+        </details>
+      )}
     </>
   );
+}
+
+export function ExpectedFieldValue({ field }: { field: Field }) {
+  if (!hasExpected(field)) return <code>{field.expectedStatus === "conflicting" ? "Conflicting source clauses" : "Not annotated"}</code>;
+  if (field.expected === null) return <code>Not found in source</code>;
+  return <StructuredValue value={field.expected} label={`${field.key} expected`} />;
 }
 
 export function ExpectedValuesEditor({

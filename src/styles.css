@@ -4710,6 +4710,25 @@ h1 {
 .field-match.different {
   color: #a64f31;
 }
+.field-source-evidence {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.field-source-evidence summary {
+  cursor: pointer;
+}
+.field-source-evidence small {
+  display: block;
+  margin-top: 8px;
+}
+.field-source-evidence blockquote {
+  margin: 8px 0 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .expected-tab {
   min-height: 0;
   flex: 1;

@@ -28,6 +28,7 @@ export type Field = {
   sourceExcerpt?: string;
   sourceLocation?: string;
   hasExpected?: boolean;
+  expectedStatus?: string;
   citations?: Citation[];
   key: string;
   value: JsonValue;
