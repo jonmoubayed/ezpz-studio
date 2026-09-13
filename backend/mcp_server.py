@@ -442,12 +442,12 @@ def create_mcp(client):
 def main():
     parser = argparse.ArgumentParser(description="Connect MCP clients to a running local ezpz API over STDIO")
     parser.add_argument("--api-url", default=os.environ.get("EZPZ_API_URL", "http://127.0.0.1:4173"))
-    parser.add_argument("--studio-url", default=os.environ.get("EZPZ_STUDIO_URL", "http://127.0.0.1:5180"))
+    parser.add_argument("--studio-url", default=os.environ.get("EZPZ_STUDIO_URL"), help="defaults to the API address used by the packaged Studio")
     parser.add_argument("--import-root", type=Path, default=Path.cwd(), help="Only files under this folder may be imported")
     parser.add_argument("--author", default="agent", help="Attribution label, e.g. codex or claude")
     args = parser.parse_args()
     try:
-        client = StudioClient(args.api_url, args.import_root, args.studio_url, args.author)
+        client = StudioClient(args.api_url, args.import_root, args.studio_url or args.api_url, args.author)
     except (ValueError, OSError) as error:
         parser.error(str(error))
     try:

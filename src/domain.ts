@@ -1,3 +1,4 @@
+import { workspaceStorage } from "./workspace-context";
 import type { ModelSettings } from "./model-settings";
 export type Page =
   | "Overview"
@@ -339,7 +340,7 @@ export function pct(value: number | null) {
 }
 export function readStored<T>(key: string, fallback: T): T {
   try {
-    return JSON.parse(localStorage.getItem(key) || "null") ?? fallback;
+    return JSON.parse(workspaceStorage.getItem(key) || "null") ?? fallback;
   } catch {
     return fallback;
   }

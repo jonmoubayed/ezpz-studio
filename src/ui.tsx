@@ -99,6 +99,7 @@ export function Modal({
   onClose,
   children,
   wide = false,
+  onCloseAutoFocus,
 }: {
   title: string;
   description?: string;
@@ -106,10 +107,11 @@ export function Modal({
   onClose: () => void;
   children: ReactNode;
   wide?: boolean;
+  onCloseAutoFocus?: (event: Event) => void;
 }) {
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className={wide ? "studio-modal wide" : "studio-modal"}>
+      <DialogContent className={wide ? "studio-modal wide" : "studio-modal"} onCloseAutoFocus={onCloseAutoFocus}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>

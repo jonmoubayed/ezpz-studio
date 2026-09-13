@@ -35,6 +35,8 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run test:mcp:browser
       - run: npm run test:harness
+      - run: npm run test:hill-loop
+      - run: npm run test:workspaces
       - name: Select package image
         run: echo "EZPZ_TEST_IMAGE=ezpz-studio:$(node -p "require('./package.json').version")" >> "$GITHUB_ENV"
       - run: docker build -t "$EZPZ_TEST_IMAGE" .

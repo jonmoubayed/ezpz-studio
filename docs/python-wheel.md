@@ -74,3 +74,21 @@ same data with an installed wheel, pass the checkout path explicitly with
 
 Docker volumes remain managed by Docker. Installing a wheel does not copy or
 move data between a Docker volume and a host workspace.
+
+## Combined Studio 0.1.4
+
+The release builds the canonical `src/` frontend and `backend/` together. It includes
+workspace switching, provider-key settings, the focused Hill climbing screen,
+automatic optimization, the visual Harness editor, saved execution traces,
+pause/resume, and the Notice custom harness adapter. Run `python scripts/build-package.py`
+from this checkout; the CI wheel is built by the same script. Changes made in a
+separate local checkout must be committed here before GitHub can package them.
+
+Installed-wheel checks verify the workspace, credentials, hill-climbing and harness
+APIs, the bundled Notice adapter, all asset checksums, and persistence after reinstall.
+Browser checks exercise Settings, workspace isolation, Hill climbing, and Harness flows.
+
+Studio and built-in harnesses run without Node. Notice's production adapter calls
+its existing TypeScript provider and therefore requires the configured Notice checkout
+and Node on the machine running evaluations. Its provider and schema hashes are
+checked before execution. It uses the current workspace's saved OpenAI key.

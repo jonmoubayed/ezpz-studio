@@ -256,7 +256,7 @@ def _builtin_models(provider: str) -> List[Dict[str, Any]]:
     ]
 
 
-def get_model_catalog(provider: str, endpoint: Optional[str] = None) -> Dict[str, Any]:
+def get_model_catalog(provider: str, endpoint: Optional[str] = None, credential_resolver=None) -> Dict[str, Any]:
     """Return live provider models enriched with local pricing metadata."""
 
     normalized_provider = _normalize_provider(provider)
@@ -279,11 +279,14 @@ def get_model_catalog(provider: str, endpoint: Optional[str] = None) -> Dict[str
         }
 
     credential_name = DEFAULT_CREDENTIALS.get(normalized_provider)
-    api_key = os.environ.get(credential_name or "")
+    lookup = credential_resolver or os.environ.get
+    api_key = lookup(credential_name or "")
+    if normalized_provider == "gemini":
+        api_key = lookup("GOOGLE_API_KEY") or api_key
     if str(provider).lower() == "ollama":
         api_key = None
     elif normalized_provider == "openai_compatible":
-        api_key = os.environ.get("OPENAI_COMPATIBLE_API_KEY") or api_key
+        api_key = lookup("OPENAI_COMPATIBLE_API_KEY") or api_key
     warnings: List[str] = []
     records: List[Dict[str, Any]] = []
     source = "provider"

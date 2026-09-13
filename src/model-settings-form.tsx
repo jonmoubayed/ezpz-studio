@@ -3,8 +3,8 @@ import { FieldSelect } from "./components/field-select";
 import { modelCapabilities, modelSettingsError, type ModelSettings } from "./model-settings";
 import "./model-settings.css";
 
-export function ModelSettingsForm({ provider, model, value = {}, onChange }: {
-  provider: string; model: string; value?: ModelSettings; onChange: (value: ModelSettings) => void;
+export function ModelSettingsForm({ provider, model, value = {}, onChange, initiallyOpen = true }: {
+  initiallyOpen?: boolean; provider: string; model: string; value?: ModelSettings; onChange: (value: ModelSettings) => void;
 }) {
   if (provider === "local") return null;
   const caps = modelCapabilities(provider, model);
@@ -22,7 +22,7 @@ export function ModelSettingsForm({ provider, model, value = {}, onChange }: {
       onChange={e => update(key, e.target.value === "" ? undefined : Number(e.target.value))} />
   </label>;
   const sampling = caps.sampling && !(provider === "anthropic" && (value.reasoning_effort || value.thinking_budget !== undefined));
-  return <details className="model-settings" open>
+  return <details className="model-settings" open={initiallyOpen}>
     <summary>Model settings <ChevronDown size={14} /></summary>
     <div className="model-settings-body">
       <div className="model-settings-grid">

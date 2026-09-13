@@ -8,7 +8,7 @@ from copy import deepcopy
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional, Tuple
 
-from .costing import estimate_cost
+from .costing import estimate_cost, run_cost_metrics
 from .confidence import CONTRACT_VERSION, valid_confidence
 from .grounding import valid_region
 from .db import Database
@@ -200,9 +200,10 @@ def canonicalize(
 
 
 class ExtractionService:
-    def __init__(self, database: Database, blobs: BlobStore):
+    def __init__(self, database: Database, blobs: BlobStore, credential_resolver=None):
         self.database = database
         self.blobs = blobs
+        self.credential_resolver = credential_resolver
         self.background_slots = threading.BoundedSemaphore(1)
         self.recovery = EvaluationRecovery(self)
 
@@ -304,6 +305,7 @@ class ExtractionService:
                     lambda model_config: self._model(processor_version) if model_config == processor_version.get("model") else self._model_from_config(model_config),
                     Path(execution_directory), execution_id,
                     (lambda: self.recovery.check(active_run_id)) if persist and not owns_run else None,
+                    credential_resolver=self.credential_resolver,
                 )
             parser_latency_ms = saved_latency_ms(harness_result.steps, {"parse"})
             model_latency_ms = saved_latency_ms(harness_result.steps, {"extract", "plugin"})
@@ -424,7 +426,19 @@ class ExtractionService:
         result["preview"] = True
         return result
 
-    def run_dataset(
+    def run_dataset(self, *args, _slot_held=False, **kwargs) -> Dict[str, Any]:
+        if not _slot_held and not self.background_slots.acquire(blocking=False):
+            raise ValueError("An evaluation is already running. Wait for it to finish before starting another.")
+        handed_off = False
+        try:
+            result = self._run_dataset(*args, **kwargs)
+            handed_off = bool(kwargs.get("background"))
+            return result
+        finally:
+            if not _slot_held and not handed_off:
+                self.background_slots.release()
+
+    def _run_dataset(
         self,
         dataset_id: str,
         processor_ref: str = "invoice-extractor",
@@ -482,8 +496,6 @@ class ExtractionService:
             if run_metadata["benchmark_snapshot"]["fingerprint"] != frozen_benchmark["fingerprint"]:
                 raise ValueError("Frozen benchmark fingerprint does not match its documents")
             run_metadata["benchmark_snapshot"] = deepcopy(frozen_benchmark)
-        if background and not self.background_slots.acquire(blocking=False):
-            raise ValueError("An evaluation is already running. Wait for it to finish or cancel it before starting another.")
         try:
             run = self.database.create_run(
                 processor_version_id=processor_version["id"],
@@ -497,12 +509,11 @@ class ExtractionService:
             if on_created:
                 on_created(run)
         except Exception:
-            if background:
-                self.background_slots.release()
             raise
         return self.recovery.dispatch(run, documents, processor_ref, version, scoring_config, force_refresh, background)
 
     def _execute_dataset_run(self, run, documents, processor_ref, version, scoring_config, force_refresh):
+        processor_version = run["processor_version"]
         # Reconstruct progress from durable results; never depend on a surviving worker.
         outcomes = self.recovery.outcomes(run["id"])
         results = [result for result in self.database.list_extractions(run["id"])
@@ -528,7 +539,7 @@ class ExtractionService:
                 )
                 self.recovery.outcome(run["id"], document["id"], "completed")
                 results.append(result)
-                total_cost += float(result.get("cost_usd", 0))
+                total_cost += float(result.get("cost_usd") or 0)
                 total_latency += int(result.get("latency_ms", 0))
             except (EvaluationInterrupted, ConnectionError, TimeoutError) as error:
                 interrupted = self.recovery.interrupted_status(run["id"], error)
@@ -557,6 +568,9 @@ class ExtractionService:
         metrics["p95_latency_ms"] = latencies[p95_index] if latencies else 0
         metrics["cost_per_document"] = round(total_cost / max(1, len(documents)), 8)
         metrics["cost_per_correct_document"] = round(total_cost / max(1, int((metrics.get("document_accuracy") or 0) * int(metrics.get("scored_documents") or 0))), 8) if metrics.get("document_accuracy") is not None and metrics.get("scored_documents") else None
+        metrics.update(run_cost_metrics(processor_version.get("model", {}), results))
+        if metrics["cost_usd"] is None:
+            metrics["cost_per_correct_document"] = None
         metrics["failures"] = failures
         status = "cancelled" if cancelled or self.database.get_run(run["id"])["status"] == "cancelling" else ("completed" if not failures else "completed_with_failures" if results else "failed")
         if interrupted:
@@ -605,7 +619,7 @@ class ExtractionService:
             "processor_version_id": processor_version.get("id"),
             # Bump when parser IR geometry changes; cached results must not
             # preserve stale layout boxes after a parser fix.
-            "cache_schema": 3,
+            "cache_schema": 4,
             "response_contract": CONTRACT_VERSION,
         }
         return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
@@ -637,13 +651,11 @@ class ExtractionService:
             "warnings": extraction.get("warnings", []),
         }
 
-    @classmethod
-    def _model(cls, processor_version: Dict[str, Any]):
-        return cls._model_from_config(processor_version.get("model", {}))
+    def _model(self, processor_version: Dict[str, Any]):
+        return self._model_from_config(processor_version.get("model", {}))
 
-    @staticmethod
-    def _model_from_config(config: Optional[Dict[str, Any]] = None):
-        return create_model_adapter(config)
+    def _model_from_config(self, config: Optional[Dict[str, Any]] = None):
+        return create_model_adapter(config, self.credential_resolver)
 
     @staticmethod
     def _cost(processor_version: Dict[str, Any], usage: Dict[str, Any], model_usage: Optional[List[Dict[str, Any]]] = None) -> float:

@@ -1,10 +1,9 @@
 """Local HTTP server for the document extraction evaluation workbench."""
 
 import argparse
-from email import policy
-from email.parser import BytesParser
 import csv
 import io
+import ipaddress
 import json
 import mimetypes
 import os
@@ -12,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import threading
 from collections import defaultdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -22,22 +22,27 @@ from .paths import bundled_studio_root, default_runtime_root
 from .config import Settings
 from .collaboration import AgentJobs, CollaborationHandler, RevisionConflict
 from .adapters import get_adapter_catalog
-from .db import Database, create_database, normalize_folder_path
+from .db import Database, create_database, normalize_folder_path, set_request_context, reset_request_context
 from .evaluation import compare_evaluations
 from .ingest import DocumentIngestor
 from .model_catalog import get_model_catalog
 from .models import new_id
 from .parser import parse_document
+from .hill_climbing import HillClimbing
 from .pipeline import ExtractionService, _evidence_for_value
 from .project_config import dump_yaml, load_yaml_text
 from .seed import ensure_empty_processor, ensure_seed
 from .storage import count_pdf_pages, create_blob_store, looks_like_pdf
+from .multipart import parse_upload
+from .credentials import CredentialStore
 
 
 class Runtime:
     def __init__(self, root: Path):
         self.settings = Settings.from_env(Path(root))
         self.root = self.settings.root
+        self._credentials = {}
+        self._credentials_lock = threading.Lock()
         self.database = create_database(self.settings.database_url, self.settings.sqlite_path)
         self.blobs = create_blob_store(self.settings.blob_root)
         self.database.initialize()
@@ -46,8 +51,21 @@ class Runtime:
         else:
             ensure_empty_processor(self.database)
         self.ingestor = DocumentIngestor(self.database, self.blobs)
-        self.extractions = ExtractionService(self.database, self.blobs)
+        self.extractions = ExtractionService(self.database, self.blobs, self.resolve_credential)
         self.agent_jobs = AgentJobs(self)
+        self.hill_climbing = HillClimbing(self.database, self.extractions)
+
+    @property
+    def credentials(self):
+        workspace_id = self.database._workspace_id()
+        with self._credentials_lock:
+            if workspace_id not in self._credentials:
+                root = self.root if workspace_id == self.database.workspace_id else self.root / ".ezpz" / "workspaces" / workspace_id
+                self._credentials[workspace_id] = CredentialStore(root)
+            return self._credentials[workspace_id]
+
+    def resolve_credential(self, name):
+        return self.credentials.resolve(name)
 
     def shutdown(self) -> None:
         """Wait for submitted agent jobs before closing the runtime."""
@@ -80,9 +98,10 @@ class EzpzHandler(CollaborationHandler, BaseHTTPRequestHandler):
         return True
 
     def do_OPTIONS(self) -> None:
-        self._begin_request()
-        if not self._trusted_request():
-            return
+        if self.path.startswith("/v1/settings/credentials"):
+            self._begin_request()
+            if not self._allow_credentials():
+                return
         self.send_response(204)
         self._cors()
         self.end_headers()
@@ -172,9 +191,37 @@ class EzpzHandler(CollaborationHandler, BaseHTTPRequestHandler):
         self.request_id = self.headers.get("X-Request-ID") or new_id("req")
 
     def _end_request(self) -> None:
-        return None
+        reset_request_context(getattr(self, "_scope_tokens", None))
+        self._scope_tokens = None
+
+    def _select_workspace(self):
+        query = parse_qs(urlparse(self.path).query)
+        identifier = (query.get("workspace_id") or [self.headers.get("X-Ezpz-Workspace") or self.runtime.database.workspace_id])[0]
+        if urlparse(self.path).path.rstrip("/") == "/v1/workspaces" and not self.runtime.database.get_workspace(identifier):
+            identifier = self.runtime.database.workspace_id
+        if not self.runtime.database.get_workspace(identifier):
+            self._error(404, "Workspace not found. Choose another workspace.")
+            return False
+        self._scope_tokens = set_request_context(identifier)
+        return True
 
     def _get_api(self, path: str, query: Dict[str, Any]) -> None:
+        if not self._allow_api_browser() or not self._select_workspace():
+            return
+        if path == "/v1/hill-climbs":
+            self._json(200, {"hill_climbs": self.runtime.hill_climbing.list()})
+            return
+        if path.startswith("/v1/hill-climbs/"):
+            job = self.runtime.hill_climbing.get(self._parts(path)[1])
+            self._json(200 if job else 404, {"hill_climb": job} if job else {"error": "Hill-climbing loop not found"})
+            return
+        if path == "/v1/workspaces":
+            self._json(200, {"workspaces": self.runtime.database.list_workspaces(), "active_workspace_id": self.runtime.database._workspace_id()})
+            return
+        if path == "/v1/settings/credentials":
+            if self._allow_credentials():
+                self._json(200, self.runtime.credentials.status())
+            return
         if self._get_collaboration(path, query):
             return
         if path == "/v1/health":
@@ -206,7 +253,7 @@ class EzpzHandler(CollaborationHandler, BaseHTTPRequestHandler):
         if path == "/v1/model-catalog":
             provider = (query.get("provider") or [""])[0]
             endpoint = (query.get("endpoint") or [None])[0]
-            self._json(200, get_model_catalog(provider, endpoint))
+            self._json(200, get_model_catalog(provider, endpoint, self.runtime.credentials.resolve))
             return
         if path == "/v1/adapters":
             self._json(200, get_adapter_catalog())
@@ -337,6 +384,32 @@ class EzpzHandler(CollaborationHandler, BaseHTTPRequestHandler):
         self._error(404, "Not found")
 
     def _post_api(self, path: str) -> None:
+        if not self._allow_api_browser() or not self._select_workspace():
+            return
+        if path == "/v1/hill-climbs":
+            payload, _ = self._request_payload()
+            self._json(202, {"hill_climb": self.runtime.hill_climbing.start(payload)})
+            return
+        if path.startswith("/v1/hill-climbs/") and path.endswith("/stop"):
+            job = self.runtime.hill_climbing.stop(self._parts(path)[1])
+            self._json(202 if job else 404, {"hill_climb": job} if job else {"error": "Hill-climbing loop not found"})
+            return
+        if path.startswith("/v1/settings/credentials/"):
+            if not self._allow_credentials(mutation=True):
+                return
+            if int(self.headers.get("Content-Length", "0")) > 8192:
+                raise ValueError("API-key request is too large.")
+            payload, _ = self._request_payload()
+            if not isinstance(payload.get("api_key"), str):
+                raise ValueError("Enter an API key to save.")
+            status = self.runtime.credentials.update(path.rsplit("/", 1)[1], payload["api_key"])
+            self.runtime.database.clear_extraction_cache()
+            self._json(200, status)
+            return
+        if path == "/v1/workspaces":
+            payload, _ = self._request_payload()
+            self._json(201, {"workspace": self.runtime.database.save_workspace(payload.get("name"))})
+            return
         if self._post_collaboration(path):
             return
         if path == "/v1/documents":
@@ -378,6 +451,8 @@ class EzpzHandler(CollaborationHandler, BaseHTTPRequestHandler):
             self._create_processor()
             return
         if path == "/v1/runs":
+            if any(job["status"] in ("running", "stopping") for job in self.runtime.hill_climbing.list()):
+                raise ValueError("An automatic loop is running. Stop it or wait for it to finish before starting a manual evaluation.")
             payload, _ = self._request_payload()
             document_ids = payload.get("document_ids")
             if document_ids is not None and not isinstance(document_ids, list):
@@ -414,7 +489,7 @@ class EzpzHandler(CollaborationHandler, BaseHTTPRequestHandler):
                 metadata,
                 force_refresh=bool(payload.get("force_refresh", payload.get("fresh", True))),
                 eval_experiment_id=eval_experiment_id,
-                background=bool(payload.get("background", False)),
+                background=bool(payload.get("background")),
             )
             self._json(202 if payload.get("background") else 201, result)
             return
@@ -490,7 +565,13 @@ class EzpzHandler(CollaborationHandler, BaseHTTPRequestHandler):
         self._error(404, "Not found")
 
     def _patch_api(self, path: str) -> None:
+        if not self._allow_api_browser() or not self._select_workspace():
+            return
         parts = self._parts(path)
+        if len(parts) == 2 and parts[0] == "workspaces":
+            payload, _ = self._request_payload()
+            self._json(200, {"workspace": self.runtime.database.save_workspace(payload.get("name"), parts[1])})
+            return
         if len(parts) == 2 and parts[0] == "documents":
             payload, _ = self._request_payload()
             folder_path = payload.get("folder_path")
@@ -534,6 +615,14 @@ class EzpzHandler(CollaborationHandler, BaseHTTPRequestHandler):
         self._error(404, "Not found")
 
     def _delete_api(self, path: str) -> None:
+        if not self._allow_api_browser() or not self._select_workspace():
+            return
+        if path.startswith("/v1/settings/credentials/"):
+            if self._allow_credentials(mutation=True):
+                status = self.runtime.credentials.update(path.rsplit("/", 1)[1])
+                self.runtime.database.clear_extraction_cache()
+                self._json(200, status)
+            return
         parts = self._parts(path)
         if len(parts) == 2 and parts[0] == "documents":
             document = self.runtime.database.get_document(parts[1])
@@ -607,11 +696,6 @@ class EzpzHandler(CollaborationHandler, BaseHTTPRequestHandler):
         dataset_ids = {run.get("dataset_id") for run in runs if run}
         if len(group_ids) > 1 or None in group_ids or len(dataset_ids) > 1:
             raise ValueError("Runs can only be compared within the same eval group")
-        if any(r["status"] != "completed" for r in runs):
-            raise ValueError("Only completed runs can be compared")
-        fingerprints = {(r.get("metadata", {}).get("benchmark_snapshot") or {}).get("fingerprint") for r in runs}
-        if len(fingerprints) != 1 or None in fingerprints:
-            raise ValueError("Runs have different or unrecorded benchmark snapshots. Run the experiments on the same current benchmark before comparing.")
         baseline = runs[0]
         comparisons = [{"baseline_run_id": baseline["id"], "candidate_run_id": candidate["id"], "comparison": compare_evaluations(baseline.get("evaluations", []), candidate.get("evaluations", []), baseline.get("metrics", {}), candidate.get("metrics", {}), threshold)} for candidate in runs[1:]]
         self._json(200, {"baseline_run_id": baseline["id"], "comparisons": comparisons})
@@ -762,7 +846,7 @@ class EzpzHandler(CollaborationHandler, BaseHTTPRequestHandler):
         extraction = self.runtime.database.latest_extraction(document["id"]) or {}
         parser_config = dict(extraction.get("processor_version", {}).get("parser") or {})
         parser_config["config"] = {**(parser_config.get("config") or {}), "ocr": True}
-        parser_ir = parse_document(document, content, parser_config or {"name": "native", "version": "1"})
+        parser_ir = parse_document(document, content, parser_config or {"name": "native", "version": "1"}, self.runtime.credentials.resolve)
         evidence = {}
         for field_path, field in ((extraction.get("result") or {}).get("fields") or {}).items():
             value = field.get("normalized_value", field.get("value")) if isinstance(field, dict) else field
@@ -840,6 +924,8 @@ class EzpzHandler(CollaborationHandler, BaseHTTPRequestHandler):
         self._cors()
         self.send_header("X-Request-ID", self.request_id)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        if self.path.startswith("/v1/settings/credentials"):
+            self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(content)))
         self.end_headers()
         self.wfile.write(content)
@@ -848,12 +934,40 @@ class EzpzHandler(CollaborationHandler, BaseHTTPRequestHandler):
         self._json(status, {"error": {"message": message, "status": status}})
 
     def _cors(self) -> None:
+        if self.path.startswith("/v1/settings/credentials"):
+            origin = self.headers.get("Origin")
+            if origin and origin in self._credential_origins():
+                self.send_header("Access-Control-Allow-Origin", origin)
+                self.send_header("Vary", "Origin")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Ezpz-Settings")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+            return
         origin = self.headers.get("Origin")
         if origin and (urlparse(origin).hostname in {"localhost", "127.0.0.1"} or origin in self.runtime.settings.cors_origin.split(",")):
             self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Vary", "Origin")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Filename, X-Request-ID")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Filename, X-Request-ID, X-Ezpz-Workspace")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+
+    def _credential_origins(self):
+        # The extra port is the repository's Vite development server.
+        return {f"http://{host}:{port}" for host in ("127.0.0.1", "localhost") for port in (self.server.server_port, 5180)}
+
+    def _allow_api_browser(self):
+        return self._trusted_request()
+
+    def _allow_credentials(self, mutation=False):
+        hosts = {f"{host}:{self.server.server_port}" for host in ("127.0.0.1", "localhost")}
+        origin = self.headers.get("Origin")
+        local = ipaddress.ip_address(self.client_address[0]).is_loopback
+        trusted = self.headers.get("Host") in hosts and (origin is None or origin in self._credential_origins())
+        if not local or not trusted or self.headers.get("Sec-Fetch-Site") == "cross-site":
+            self._error(403, "Manage API keys from the local Studio window.")
+            return False
+        if mutation and (self.headers.get("X-Ezpz-Settings") != "1" or self.headers.get("Content-Type", "").split(";", 1)[0].strip() != "application/json"):
+            self._error(403, "API-key changes require a local Studio settings request.")
+            return False
+        return True
 
     def _request_payload(self) -> Tuple[Dict[str, Any], Optional[Tuple[str, bytes, Optional[str]]]]:
         try:
@@ -864,25 +978,8 @@ class EzpzHandler(CollaborationHandler, BaseHTTPRequestHandler):
             raise ValueError("Request body is too large")
         body = self.rfile.read(length) if length else b""
         content_type = self.headers.get("Content-Type", "")
-        if content_type.startswith("multipart/form-data"):
-            message = BytesParser(policy=policy.default).parsebytes(
-                ("Content-Type: " + content_type + "\r\nMIME-Version: 1.0\r\n\r\n").encode("utf-8") + body
-            )
-            if not message.is_multipart() or message.defects:
-                raise ValueError("Invalid multipart upload")
-            payload = {}
-            upload = None
-            for part in message.iter_parts():
-                key = part.get_param("name", header="content-disposition")
-                if not key:
-                    continue
-                content = part.get_payload(decode=True) or b""
-                filename = part.get_filename()
-                if filename is not None and key == "file" and upload is None:
-                    upload = (filename or "document", content, part.get_content_type())
-                elif filename is None and key not in payload:
-                    payload[key] = content.decode(part.get_content_charset() or "utf-8")
-            return payload, upload
+        if content_type.lower().startswith("multipart/form-data"):
+            return parse_upload(content_type, body)
         if not body:
             return {}, None
         try:
@@ -960,6 +1057,7 @@ def make_server(root: Optional[Path] = None, host: str = "127.0.0.1", port: int 
     except Exception:
         server.server_close()
         raise
+    runtime.hill_climbing.recover()
     return server
 
 
@@ -968,8 +1066,9 @@ def main() -> None:
     parser.add_argument("--host", default=os.environ.get("EZPZ_HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("EZPZ_PORT", "4173")))
     parser.add_argument("--root", type=Path, default=default_runtime_root())
+    parser.add_argument("--static-root", type=Path, help="serve a developer-built frontend directory")
     args = parser.parse_args()
-    server = make_server(args.root, args.host, args.port)
+    server = make_server(args.root, args.host, args.port, static_root=args.static_root)
     print("ezpz running at http://{}:{}/".format(args.host, args.port))
     try:
         server.serve_forever()

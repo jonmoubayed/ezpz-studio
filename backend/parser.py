@@ -910,10 +910,11 @@ def _llama_pages_from_result(result: Dict[str, Any], document: Dict[str, Any], g
     return pages, has_layout
 
 
-def _llama_parse_pages(document: Dict[str, Any], data: bytes, parser_config: Dict[str, Any]) -> Tuple[List[DocumentPage], Dict[str, Any], List[str]]:
+def _llama_parse_pages(document: Dict[str, Any], data: bytes, parser_config: Dict[str, Any], credential_resolver=None) -> Tuple[List[DocumentPage], Dict[str, Any], List[str]]:
     config = parser_config.get("config") if isinstance(parser_config.get("config"), dict) else {}
     credential_ref = str(config.get("credential_ref") or parser_config.get("credential_ref") or "").strip()
-    api_key = os.environ.get(credential_ref) if credential_ref else (os.environ.get("LLAMA_CLOUD_API_KEY") or os.environ.get("LLAMA_PARSE_API_KEY"))
+    lookup = credential_resolver or os.environ.get
+    api_key = lookup(credential_ref) if credential_ref else (lookup("LLAMA_CLOUD_API_KEY") or lookup("LLAMA_PARSE_API_KEY"))
     if not api_key:
         raise RuntimeError("LLAMA_CLOUD_API_KEY is not set")
     base_url = str(config.get("base_url") or os.environ.get("LLAMA_PARSE_BASE_URL") or "https://api.cloud.llamaindex.ai/api/v2").rstrip("/")
@@ -978,7 +979,7 @@ def _llama_parse_pages(document: Dict[str, Any], data: bytes, parser_config: Dic
     return pages, details, warnings
 
 
-def parse_document(document: Dict[str, Any], data: bytes, parser_config: Dict[str, Any]) -> DocumentIR:
+def parse_document(document: Dict[str, Any], data: bytes, parser_config: Dict[str, Any], credential_resolver=None) -> DocumentIR:
     parser_name = normalize_parser_name(parser_config.get("name") or parser_config.get("provider") or "docling")
     parser_version = parser_config.get("version", "2.10")
     recorded_page_count = int(document.get("page_count") or 0)
@@ -1005,7 +1006,7 @@ def parse_document(document: Dict[str, Any], data: bytes, parser_config: Dict[st
     image_pages = _image_layout_pages(document, data, text) if parser_config.get("config", {}).get("ocr", True) is not False else None
     if parser_name in {"llama-parse", "llamaparse", "llama_parse"}:
         try:
-            llama_pages, parser_details, llama_warnings = _llama_parse_pages(document, data, parser_config)
+            llama_pages, parser_details, llama_warnings = _llama_parse_pages(document, data, parser_config, credential_resolver)
             if llama_pages:
                 pages = llama_pages
                 page_count = len(pages)
