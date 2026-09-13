@@ -52,16 +52,25 @@ export function evaluationDocuments(
       const prediction = predictions.find((f) => f.key === key);
       const score = ev?.fields?.[key];
       return {
-        ...(prediction ?? { key, value: null, expected: null, confidence: 0 }),
+        ...(prediction ?? {
+          key,
+          value: null,
+          expected: null,
+          confidence: null,
+        }),
         value:
           score && Object.hasOwn(score, "actual")
             ? score.actual
             : (prediction?.value ?? null),
         expected: score?.expected ?? null,
+        hasExpected:
+          !!score &&
+          Object.hasOwn(score, "expected") &&
+          score.status !== "unscored",
         status: score?.status || "unscored",
       } as Field;
     });
-    return { ...doc, fields, runId: raw.id, warnings: ex?.warnings ?? [] };
+    return { ...doc, fields, runId: raw.id, warnings: ex?.warnings ?? [], harnessSteps: ex?.result?.provenance?.harness_steps };
   });
 }
 export function demoEvaluationDocuments(run: Run): Document[] {
@@ -90,4 +99,86 @@ export function scoreDelta(value: number | null, baseline: number | null) {
   if (value === null || baseline === null) return "—";
   const delta = (value - baseline) * 100;
   return `${delta > 0 ? "+" : ""}${delta.toFixed(1)} pts`;
+}
+
+// Experiments own a fixed configuration; repeated runs remain separate executions.
+export function groupExperiments(group: ReturnType<typeof groupRuns>[number]) {
+  const map = new Map(
+    (group.experiments || []).map((e) => [e.id, { ...e, runs: [] as Run[] }]),
+  );
+  for (const run of group.runs) {
+    const id = run.experimentId || `legacy:${run.id}`;
+    if (!map.has(id))
+      map.set(id, {
+        id,
+        name: run.name,
+        date: run.date,
+        config: run.config,
+        runs: [],
+      });
+    map.get(id)!.runs.push(run);
+  }
+  return [...map.values()]
+    .map((e) => ({
+      ...e,
+      runs: [...e.runs].sort((a, b) => a.date.localeCompare(b.date)),
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+export function configurationChanges(
+  config?: Run["config"],
+  baseline?: Run["config"],
+) {
+  if (!config || !baseline) return ["Configuration unavailable"];
+  const keys = [
+    ["provider", "Provider"],
+    ["model", "Model"],
+    ["parser", "Parser"],
+    ["prompt", "Prompt"],
+    ["schema", "Schema"],
+    ["baseUrl", "Endpoint"],
+  ] as const;
+  return keys
+    .filter(([key]) => config[key] !== baseline[key])
+    .map(([, label]) => label);
+}
+export function evaluationPath(
+  groupId?: string,
+  experimentId?: string,
+  runId?: string,
+) {
+  return (
+    "#Evaluations" +
+    (groupId ? `/group/${encodeURIComponent(groupId)}` : "") +
+    (experimentId ? `/experiment/${encodeURIComponent(experimentId)}` : "") +
+    (runId ? `/run/${encodeURIComponent(runId)}` : "")
+  );
+}
+export function parseEvaluationPath(hash: string) {
+  try {
+    const parts = hash.split("/").map(decodeURIComponent);
+    return {
+      groupId: parts[1] === "group" ? parts[2] : undefined,
+      experimentId: parts[3] === "experiment" ? parts[4] : undefined,
+      runId: parts[5] === "run" ? parts[6] : undefined,
+      compare: parts[3] === "compare",
+    };
+  } catch {
+    return {};
+  }
+}
+
+export function formatCost(cost: number | null): string {
+  if (cost === null) return "Unavailable";
+  if (cost > 0 && cost < 0.0001) return "<$0.0001";
+  return `$${cost.toFixed(cost > 0 && cost < 0.01 ? 4 : 3)}`;
+}
+export function totalRunCost(runs: Run[]): number | null {
+  return runs.some((run) => run.cost === null)
+    ? null : runs.reduce((sum, run) => sum + (run.cost ?? 0), 0);
+}
+export function formatRunDuration(seconds: number | null | undefined): string {
+  if (seconds == null || !Number.isFinite(seconds)) return "—";
+  const rounded = Math.round(seconds);
+  return rounded < 60 ? `${rounded}s` : `${Math.floor(rounded / 60)}m ${rounded % 60}s`;
 }

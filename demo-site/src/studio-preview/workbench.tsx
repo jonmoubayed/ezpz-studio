@@ -1,3 +1,9 @@
+import { extractionValues, fieldTree } from "./extraction-output";
+import { ExtractionFields } from "./extraction-fields";
+import { StructuredValue, isObjectArray } from "./structured-value";
+import { isLowConfidence } from "./confidence";
+import { ExpectedValuesEditor, FieldValues } from "./expected-values";
+import { FieldSelect } from "./components/field-select";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import {
   ArrowDownToLine,
@@ -36,7 +42,15 @@ const PDFViewer = lazy(() =>
   })),
 );
 import { HumanReviewHighlight } from "./components/extend/human-review-highlight";
-import { Button, Badge, Busy, Empty, Heading, Modal } from "./ui";
+import {
+  ConfidenceBadge,
+  Button,
+  Badge,
+  Busy,
+  Empty,
+  Heading,
+  Modal,
+} from "./ui";
 import { useStudio } from "./store";
 import { ModelMark } from "./pages";
 import {
@@ -45,14 +59,19 @@ import {
   type JsonValue,
   type Document,
   type Field,
+  type Citation,
 } from "./domain";
 import * as api from "./api";
 export function SourceViewer({
   document,
   field,
+  onCitationsResolved,
+  onCitationStatus,
 }: {
   document: Document;
   field?: Field;
+  onCitationsResolved?: (citations: Citation[]) => void;
+  onCitationStatus?: (status: string) => void;
 }) {
   const viewer = useRef<PDFViewerHandle>(null);
   const container = useRef<HTMLDivElement>(null);
@@ -66,10 +85,47 @@ export function SourceViewer({
     return () => observer.disconnect();
   }, []);
   const [text, setText] = useState("");
+  const [viewerReady, setViewerReady] = useState(0);
+  const [viewerSource, setViewerSource] = useState("");
+  const [grounded, setGrounded] = useState<{ key: string; citations: Citation[] }>();
+  const citationKey = `${document.id}:${field?.key}`;
+  const resolvedCallback = useRef(onCitationsResolved);
+  const statusCallback = useRef(onCitationStatus);
+  resolvedCallback.current = onCitationsResolved;
+  statusCallback.current = onCitationStatus;
+  const citations = field?.citations?.length
+    ? field.citations
+    : field?.area
+      ? [{ page: field.page || 1, area: field.area }]
+      : grounded?.key === citationKey ? grounded.citations : [];
+  useEffect(() => {
+    if (field?.area || !field?.sourceExcerpt || viewerSource !== document.src || !viewerReady || !viewer.current) return;
+    const abort = new AbortController();
+    // Capture these callbacks so a field switch can't receive an older result.
+    const onResolved = resolvedCallback.current;
+    const onStatus = statusCallback.current;
+    onStatus?.("Locating source excerpt…");
+    viewer.current.locateExcerpt(field.sourceExcerpt, field.sourceLocation, abort.signal)
+      .then((matches) => {
+        if (abort.signal.aborted) return;
+        setGrounded({ key: citationKey, citations: matches });
+        if (matches.length) {
+          viewer.current?.scrollToPageArea(matches[0].page, matches[0].area);
+          onResolved?.(matches);
+          onStatus?.(`Highlighted source excerpt · page ${matches[0].page}`);
+        } else {
+          onStatus?.("Saved excerpt could not be located in the PDF");
+        }
+      })
+      .catch(() => {
+        if (!abort.signal.aborted) onStatus?.("Source excerpt lookup unavailable");
+      });
+    return () => abort.abort();
+  }, [citationKey, document.src, field?.area, field?.sourceExcerpt, field?.sourceLocation, viewerReady, viewerSource]);
   useEffect(() => {
     if (field?.area)
       viewer.current?.scrollToPageArea(field.page || 1, field.area);
-  }, [field?.key, document.id]);
+  }, [field?.key, field?.page, field?.area, document.id, viewerReady]);
   useEffect(() => {
     setText("");
     if (document.type.startsWith("text/")) {
@@ -94,6 +150,10 @@ export function SourceViewer({
         >
           <PDFViewer
             ref={viewer}
+            onDocumentLoadSuccess={() => {
+              setViewerSource(document.src);
+              requestAnimationFrame(() => setViewerReady((v) => v + 1));
+            }}
             defaultZoom={Math.max(0.25, Math.min(1, (viewerWidth - 40) / 612))}
             src={document.src}
             fileName={document.name}
@@ -101,17 +161,27 @@ export function SourceViewer({
             showRotateControls={false}
             className="actual-pdf-viewer h-full border-0 rounded-none"
             renderPageOverlay={({ pageNumber }) =>
-              field?.area && pageNumber === (field.page || 1) ? (
-                <HumanReviewHighlight
-                  location={{ page: field.page || 1, area: field.area }}
-                />
-              ) : null
+              citations
+                .filter((c) => c.page === pageNumber)
+                .map((citation, index) => (
+                  <HumanReviewHighlight
+                    key={`${pageNumber}-${index}`}
+                    location={citation}
+                  />
+                ))
             }
           />
         </Suspense>
       ) : document.type.startsWith("image/") ? (
         <div className="image-source">
-          <img src={document.src} alt={`Source document: ${document.name}`} />
+          <div className="image-page">
+            <img src={document.src} alt={`Source document: ${document.name}`} />
+            {citations
+              .filter((c) => c.page === 1)
+              .map((citation, index) => (
+                <HumanReviewHighlight key={index} location={citation} />
+              ))}
+          </div>
         </div>
       ) : document.type.startsWith("text/") ? (
         <pre className="text-source">{text || "Loading source…"}</pre>
@@ -129,46 +199,198 @@ export function SourceViewer({
     </div>
   );
 }
+export function WorkbenchControls({
+  onConfigure,
+  onSchema,
+  status,
+}: {
+  onConfigure: () => void;
+  onSchema: () => void;
+  status?: string;
+}) {
+  const s = useStudio();
+  return (
+    <>
+      <div className="playground-processor">
+        <label>
+          Processor
+          <FieldSelect
+            aria-label="Playground processor"
+            disabled={s.busy}
+            value={s.activeProcessor?.id || ""}
+            onValueChange={(value) => {
+              const p = s.processors.find((p) => p.id === value);
+              if (p) s.chooseProcessor(p);
+            }}
+            options={[
+              { value: "", label: "Unsaved configuration", disabled: true },
+              ...s.processors.map((p) => ({
+                value: p.id,
+                label: p.name + " · v" + p.version,
+              })),
+            ]}
+          />
+        </label>
+        <button onClick={s.saveAsProcessor}>Save as processor</button>
+        <button onClick={() => s.navigate("Processors")}>
+          Manage processors <ArrowRight size={12} />
+        </button>
+      </div>
+      <div className="workbench-config">
+        <div>
+          <button className="config-step" onClick={onConfigure}>
+            <span>01</span>
+            <FileScan size={14} />
+            {s.config.parser === "native" ? "Native text" : s.config.parser}
+          </button>
+          <ChevronRight size={13} />
+          <button className="config-step" onClick={onConfigure}>
+            <span>02</span>
+            <ModelMark provider={s.config.provider} />
+            {s.config.model}
+            <ChevronDown size={12} />
+          </button>
+          <ChevronRight size={13} />
+          <button className="config-step" onClick={onSchema}>
+            <span>03</span>
+            <Braces size={14} />
+            Output schema
+          </button>
+        </div>
+        <Badge tone={s.mode === "demo" ? "orange" : "green"}>
+          {status ||
+            (s.mode === "demo" ? "Sample fixture" : "Live configuration")}
+        </Badge>
+      </div>
+    </>
+  );
+}
+
+export function WorkbenchSource({
+  document: d,
+  field,
+  label = "Source document",
+  onDocumentChange,
+}: {
+  document?: Document;
+  field?: Field;
+  label?: string;
+  onDocumentChange?: () => void;
+}) {
+  const s = useStudio();
+  const [filesOpen, setFilesOpen] = useState(false);
+  const [q, setQ] = useState("");
+  return (
+    <>
+      <section className="source-pane" aria-label={label}>
+        <div className="pane-heading">
+          <button
+            className="source-selector"
+            disabled={s.busy}
+            onClick={() => setFilesOpen(true)}
+          >
+            <span className="pdf-icon">
+              <FileText size={16} />
+            </span>
+            <strong>{d?.name || "Choose a source document"}</strong>
+            <ChevronDown size={14} />
+          </button>
+          <button
+            className="icon-button"
+            aria-label="Upload document"
+            disabled={s.busy}
+            onClick={() => s.setUploadOpen(true)}
+          >
+            <Plus size={17} />
+          </button>
+        </div>
+        {d ? (
+          <SourceViewer document={d} field={field} />
+        ) : (
+          <Empty
+            title="Add a test document"
+            description="Keep the source beside your schema as you build."
+            action={
+              <Button onClick={() => s.setUploadOpen(true)}>
+                <Plus size={15} />
+                Add document
+              </Button>
+            }
+          />
+        )}
+        <div className="source-footer">
+          <span>
+            <ShieldCheck size={13} />
+            Original source
+          </span>
+          {d && (
+            <a href={d.src} download={d.name}>
+              <Download size={13} />
+              Download
+            </a>
+          )}
+          <span>Viewer by Extend UI</span>
+        </div>
+      </section>
+      <Modal
+        title="Choose a source document"
+        description="Inspect an existing document or add a new one."
+        open={filesOpen}
+        onClose={() => setFilesOpen(false)}
+      >
+        <div className="search-box">
+          <Search size={16} />
+          <input
+            aria-label="Find source document"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Find a document…"
+          />
+        </div>
+        <div className="command-results">
+          {s.documents
+            .filter((x) => x.name.toLowerCase().includes(q.toLowerCase()))
+            .map((x) => (
+              <button
+                key={x.id}
+                onClick={() => {
+                  s.selectDocument(x);
+                  setFilesOpen(false);
+                  onDocumentChange?.();
+                }}
+              >
+                <FileText size={16} />
+                {x.name}
+                {d?.id === x.id ? (
+                  <Check size={15} />
+                ) : (
+                  <ArrowRight size={15} />
+                )}
+              </button>
+            ))}
+        </div>
+        <Button
+          onClick={() => {
+            setFilesOpen(false);
+            s.setUploadOpen(true);
+          }}
+        >
+          <Plus size={14} />
+          Add documents
+        </Button>
+      </Modal>
+    </>
+  );
+}
+
 export function Playground() {
   const s = useStudio();
   const [tab, setTab] = useState("Fields");
   const [active, setActive] = useState("invoice_number");
-  const [filesOpen, setFilesOpen] = useState(false);
-  const [q, setQ] = useState("");
   const [groundTruthOpen, setGroundTruthOpen] = useState(false);
-  const [groundTruth, setGroundTruth] = useState("");
-  const [error, setError] = useState("");
   const d = s.selected;
   const field = d?.fields.find((f) => f.key === active);
-  const json = Object.fromEntries(d?.fields.map((f) => [f.key, f.value]) || []);
-  async function saveGroundTruth() {
-    try {
-      const value = JSON.parse(groundTruth);
-      if (!value || typeof value !== "object" || Array.isArray(value))
-        throw new Error("Ground truth must be a JSON object.");
-      if (s.mode === "live")
-        await api.request(`/documents/${d.id}/ground-truth`, {
-          method: "POST",
-          body: JSON.stringify({
-            value,
-            annotation_status: "complete",
-            author: "local",
-          }),
-        });
-      else
-        s.updateDocument({
-          ...d,
-          fields: d.fields.map((f) => ({
-            ...f,
-            expected: value[f.key] ?? f.expected,
-          })),
-        });
-      setGroundTruthOpen(false);
-      s.setMessage("Ground truth saved for this document.");
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }
+  const json = extractionValues(d?.fields || []);
   return (
     <>
       <Heading
@@ -197,66 +419,10 @@ export function Playground() {
           </>
         }
       />
-      <div className="playground-processor">
-        <label>
-          Processor
-          <select
-            aria-label="Playground processor"
-            value={s.activeProcessor?.id || ""}
-            onChange={(e) => {
-              const p = s.processors.find((p) => p.id === e.target.value);
-              if (p) s.chooseProcessor(p);
-            }}
-          >
-            <option value="" disabled>
-              Unsaved configuration
-            </option>
-            {s.processors.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name} · v{p.version}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button onClick={s.saveAsProcessor}>Save as processor</button>
-        <button onClick={() => s.navigate("Processors")}>
-          Manage processors <ArrowRight size={12} />
-        </button>
-      </div>
-      <div className="workbench-config">
-        <div>
-          <span className="config-step">
-            <span>01</span>
-            <FileScan size={14} />
-            {s.config.parser === "native" ? "Native text" : s.config.parser}
-          </span>
-          <ChevronRight size={13} />
-          <button
-            className="config-step"
-            onClick={() => s.navigate("Configuration")}
-          >
-            <span>02</span>
-            <ModelMark provider={s.config.provider} />
-            {s.config.model}
-            <ChevronDown size={12} />
-          </button>
-          <ChevronRight size={13} />
-          <button
-            className="config-step"
-            onClick={() => {
-              setTab("Schema");
-              s.navigate("Configuration");
-            }}
-          >
-            <span>03</span>
-            <Braces size={14} />
-            Output schema
-          </button>
-        </div>
-        <Badge tone={s.mode === "demo" ? "orange" : "green"}>
-          {s.mode === "demo" ? "Sample fixture" : "Live configuration"}
-        </Badge>
-      </div>
+      <WorkbenchControls
+        onConfigure={() => s.navigate("Configuration")}
+        onSchema={() => s.navigate("Configuration")}
+      />
       {!d ? (
         <Empty
           title="A blank page, full of possibilities."
@@ -270,39 +436,7 @@ export function Playground() {
         />
       ) : (
         <div className="workbench-layout">
-          <section className="source-pane">
-            <div className="pane-heading">
-              <button
-                className="source-selector"
-                onClick={() => setFilesOpen(true)}
-              >
-                <span className="pdf-icon">
-                  <FileText size={16} />
-                </span>
-                <strong>{d.name}</strong>
-                <ChevronDown size={14} />
-              </button>
-              <button
-                className="icon-button"
-                aria-label="Upload document"
-                onClick={() => s.setUploadOpen(true)}
-              >
-                <Plus size={17} />
-              </button>
-            </div>
-            <SourceViewer document={d} field={field} />
-            <div className="source-footer">
-              <span>
-                <ShieldCheck size={13} />
-                Original source
-              </span>
-              <a href={d.src} download={d.name}>
-                <Download size={13} />
-                Download
-              </a>
-              <span>Viewer by Extend UI</span>
-            </div>
-          </section>
+          <WorkbenchSource document={d} field={field} />
           <section className="results-pane">
             <div className="pane-heading">
               <span className="results-title">
@@ -318,14 +452,14 @@ export function Playground() {
               </button>
             </div>
             <div className="results-tabs">
-              {["Fields", "JSON", "Schema"].map((t) => (
+              {["Fields", "JSON", "Expected", "Schema"].map((t) => (
                 <button
                   key={t}
                   className={tab === t ? "active" : ""}
                   onClick={() => setTab(t)}
                 >
                   {t}
-                  {t === "Fields" && <span>{d.fields.length}</span>}
+                  {t === "Fields" && <span>{fieldTree(d.fields).length}</span>}
                 </button>
               ))}
             </div>
@@ -336,46 +470,36 @@ export function Playground() {
                     <i />
                     {d.fields.length ? "Extraction ready" : "Ready to extract"}
                   </span>
-                  <Badge>{d.fields.length} fields</Badge>
+                  <Badge>{fieldTree(d.fields).length} fields</Badge>
                 </div>
                 {d.fields.length ? (
                   <div className="field-list">
-                    {d.fields.map((f) => (
-                      <button
+                    <ExtractionFields fields={d.fields} renderField={(f, name) => (
+                      <article
                         key={f.key}
-                        className={`field-card ${active === f.key ? "selected" : ""} ${f.confidence < 0.9 ? "uncertain" : ""}`}
+                        className={`field-card ${active === f.key ? "selected" : ""} ${isLowConfidence(f) ? "uncertain" : ""}`}
                         onClick={() => setActive(f.key)}
                       >
-                        <div>
+                        <button
+                          type="button"
+                          className="field-source-trigger"
+                          aria-label={`Inspect source for ${f.key}`}
+                          aria-pressed={active === f.key}
+                        >
                           <span className="field-name">
                             <span>
                               {typeof f.value === "number" ? "#" : "Aa"}
                             </span>
-                            {f.key}
+                            {name}
                           </span>
-                          <span
-                            className={`confidence ${f.confidence < 0.9 ? "low" : ""}`}
-                          >
-                            {f.confidence < 0.9 ? (
-                              <Flag size={11} />
-                            ) : (
-                              <Check size={11} />
-                            )}{" "}
-                            {(f.confidence * 100).toFixed(0)}%
-                          </span>
-                        </div>
-                        <strong>
-                          {typeof f.value === "number"
-                            ? f.value.toLocaleString("en-US", {
-                                maximumFractionDigits: 2,
-                              })
-                            : displayValue(f.value)}
-                        </strong>
+                          <ConfidenceBadge field={f} />
+                        </button>
+                        <FieldValues field={f} />
                         <small>
                           {f.area ? (
                             <>
                               <Focus size={11} />
-                              Source · page {f.page || 1}
+                              {f.citations?.[0]?.source === "model" ? "Model estimate" : "Source"} · page {f.page || 1}
                               <ArrowUpRightIcon />
                             </>
                           ) : (
@@ -385,8 +509,8 @@ export function Playground() {
                             </>
                           )}
                         </small>
-                      </button>
-                    ))}
+                      </article>
+                    )} />
                   </div>
                 ) : (
                   <Empty
@@ -395,6 +519,10 @@ export function Playground() {
                   />
                 )}
               </>
+            ) : tab === "Expected" ? (
+              <div className="expected-tab">
+                <ExpectedValuesEditor key={d.id} document={d} />
+              </div>
             ) : tab === "JSON" ? (
               <pre className="json-output extraction-json">
                 {JSON.stringify(json, null, 2)}
@@ -417,25 +545,15 @@ export function Playground() {
               </div>
             ) : null}
             <div className="results-footer">
-              <Button
-                disabled={!d.fields.length}
-                onClick={() => {
-                  setGroundTruth(
-                    JSON.stringify(
-                      Object.fromEntries(
-                        d.fields.map((f) => [f.key, f.expected]),
-                      ),
-                      null,
-                      2,
-                    ),
-                  );
-                  setError("");
-                  setGroundTruthOpen(true);
-                }}
-              >
-                <CheckCheck size={14} />
-                Edit ground truth
-              </Button>
+              {tab !== "Expected" && (
+                <Button
+                  disabled={s.busy}
+                  onClick={() => setGroundTruthOpen(true)}
+                >
+                  <CheckCheck size={14} />
+                  Edit ground truth
+                </Button>
+              )}
               <button
                 className="icon-button"
                 aria-label="Copy extraction JSON"
@@ -457,74 +575,21 @@ export function Playground() {
         </div>
       )}
       <Modal
-        title="Choose a source document"
-        description="Inspect an existing document or add a new one."
-        open={filesOpen}
-        onClose={() => setFilesOpen(false)}
-      >
-        <div className="search-box">
-          <Search size={16} />
-          <input
-            aria-label="Find source document"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Find a document…"
-          />
-        </div>
-        <div className="command-results">
-          {s.documents
-            .filter((x) => x.name.toLowerCase().includes(q.toLowerCase()))
-            .map((x) => (
-              <button
-                key={x.id}
-                onClick={() => {
-                  s.selectDocument(x);
-                  setFilesOpen(false);
-                }}
-              >
-                <FileText size={16} />
-                {x.name}
-                {d?.id === x.id ? (
-                  <Check size={15} />
-                ) : (
-                  <ArrowRight size={15} />
-                )}
-              </button>
-            ))}
-        </div>
-        <Button
-          onClick={() => {
-            setFilesOpen(false);
-            s.setUploadOpen(true);
-          }}
-        >
-          <Plus size={14} />
-          Add documents
-        </Button>
-      </Modal>
-      <Modal
         title="Document ground truth"
         description="Use the source to provide expected values for future evaluations."
         open={groundTruthOpen}
         onClose={() => setGroundTruthOpen(false)}
       >
-        <label>
-          Expected values
-          <textarea
-            className="code-editor"
-            rows={14}
-            value={groundTruth}
-            onChange={(e) => setGroundTruth(e.target.value)}
+        {d && (
+          <ExpectedValuesEditor
+            key={d.id}
+            document={d}
+            onSaved={(message) => {
+              setGroundTruthOpen(false);
+              s.setMessage(message);
+            }}
           />
-        </label>
-        {error && (
-          <p role="alert" className="form-error">
-            {error}
-          </p>
         )}
-        <Button variant="primary" onClick={saveGroundTruth}>
-          Save ground truth
-        </Button>
       </Modal>
     </>
   );
@@ -538,14 +603,14 @@ export function ReviewQueue() {
   const [filter, setFilter] = useState("pending");
   const [value, setValue] = useState("");
   const [note, setNote] = useState("");
-  const items = s.documents
+  const items = s.reviewDocuments
     .filter((d) => s.mode === "demo" || d.runId)
     .flatMap((d) =>
       d.fields
         .filter(
           (f) =>
             filter === "all" ||
-            f.confidence < 0.9 ||
+            isLowConfidence(f) ||
             (s.mode === "live" &&
               f.status &&
               f.status !== "correct" &&
@@ -565,9 +630,13 @@ export function ReviewQueue() {
     .filter((item) => filter === "all" || !item.review);
   const current = items[Math.min(index, Math.max(0, items.length - 1))];
   useEffect(() => {
-    setValue(current ? displayValue(current.f.value) : "");
-    setNote("");
-  }, [current?.d.id, current?.f.key]);
+    setValue(
+      current
+        ? displayValue(current.review ? current.review.value : current.f.value)
+        : "",
+    );
+    setNote(current?.review?.note || "");
+  }, [current?.d.id, current?.d.runId, current?.f.key, current?.review?.at]);
   const completed = s.reviews.length;
   async function save(status: string) {
     if (!current) return;
@@ -610,6 +679,29 @@ export function ReviewQueue() {
           </Button>
         }
       />
+      {s.mode === "live" && (
+        <div className="review-run-select">
+          <label>
+            Evaluation run
+            <FieldSelect
+              aria-label="Review evaluation run"
+              value={s.reviewRunId}
+              disabled={s.reviewLoading || s.busy}
+              options={s.runs.map((r) => ({
+                value: r.id,
+                label: `${r.name} · ${r.dataset} · v${r.version}`,
+              }))}
+              onValueChange={(id) => {
+                setIndex(0);
+                void s.loadReviewRun(id);
+              }}
+            />
+          </label>
+          {s.reviewLoading && (
+            <Busy label="Loading saved results and feedback…" />
+          )}
+        </div>
+      )}
       <div className="review-progress">
         <div>
           <span className="review-progress-icon">
@@ -648,12 +740,14 @@ export function ReviewQueue() {
           <Empty
             title={
               s.mode === "live"
-                ? "No fields loaded for review"
+                ? s.reviewRunId
+                  ? "No pending fields in this run"
+                  : "No fields loaded for review"
                 : "You’re all caught up."
             }
             description={
               s.mode === "live"
-                ? "Open a scored run in Evaluations and choose Inspect results to load its fields."
+                ? "Choose a saved evaluation above, or switch to All fields to inspect reviewed values."
                 : "Every uncertain field in this demo has a saved decision. Take the next step with a new experiment."
             }
             action={
@@ -688,7 +782,7 @@ export function ReviewQueue() {
               <span>
                 <Focus size={13} />
                 {current.f.area
-                  ? `Citation on page ${current.f.page || 1}`
+                  ? `${current.f.citations?.[0]?.source === "model" ? "Model-estimated box" : "Citation"} on page ${current.f.page || 1}`
                   : "No citation for this field"}
               </span>
               <span>Viewer by Extend UI</span>
@@ -705,28 +799,30 @@ export function ReviewQueue() {
               </span>
             </div>
             <div className="decision-body">
-              <Badge tone={current.f.confidence < 0.9 ? "orange" : "green"}>
-                {current.f.confidence < 0.9 ? (
-                  <Flag size={12} />
-                ) : (
-                  <Check size={12} />
-                )}{" "}
-                {Math.round(current.f.confidence * 100)}% confidence
-              </Badge>
+              <ConfidenceBadge field={current.f} />
               <h2>{current.f.key}</h2>
               <p>Check this value against the highlighted source.</p>
-              <div className="review-values">
+              <div
+                className={`review-values ${isObjectArray(current.f.value) || isObjectArray(current.f.expected) ? "has-table" : ""}`}
+              >
                 <div>
                   <span>EXTRACTED VALUE</span>
-                  <strong>{displayValue(current.f.value)}</strong>
+                  <StructuredValue
+                    value={current.f.value}
+                    label={`${current.f.key} result`}
+                  />
                 </div>
                 <div>
                   <span>EXPECTED VALUE</span>
-                  <strong>
-                    {current.f.expected === null
-                      ? "Not annotated"
-                      : displayValue(current.f.expected)}
-                  </strong>
+                  {current.f.expected === null &&
+                  (!current.f.status || current.f.status === "unscored") ? (
+                    <code>Not annotated</code>
+                  ) : (
+                    <StructuredValue
+                      value={current.f.expected}
+                      label={`${current.f.key} expected`}
+                    />
+                  )}
                 </div>
               </div>
               {current.review && (

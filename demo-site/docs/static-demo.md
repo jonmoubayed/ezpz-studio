@@ -1,6 +1,6 @@
 # Hosting the static demo
 
-Build with `pnpm build`, run `pnpm test:demo`, and serve or upload only `dist/`. `pnpm preview` serves this exact production output locally. The standalone studio and Python backend are separate from this public demo.
+Build with `pnpm build`, run `pnpm test:demo`, and serve or upload only `dist/`. Every build refreshes the demo from `../src`, the same frontend shipped in the Python package. `pnpm preview` serves this exact production output locally. The Python backend is not included in this public demo.
 
 ## Host configuration
 
@@ -32,4 +32,6 @@ Static asset downloads (including PDF, WASM, fonts and JavaScript) are expected.
 
 Run `pnpm build && pnpm test:demo`. Serve `dist/` using an ordinary static server with no backend running. Open the demo directly at `/studio/index.html`, run a sample extraction, try an evaluation, inspect Settings, and verify that no `/v1` or external-provider requests appear in browser network activity.
 
-`scripts/sync-studio-preview.mjs` reapplies `scripts/harden-studio-demo.mjs` after copying the standalone frontend. Hardening fails on unexpected source structure and is also mandatory before every build/dev startup, so a future sync cannot silently restore live mode. Rebuild and rerun the checks after every sync.
+`pnpm build` and `pnpm dev` run `scripts/sync-studio-preview.mjs`, which copies `../src` and its public assets, then reapplies `scripts/harden-studio-demo.mjs`. Do not edit `src/studio-preview` directly; it is generated. Make interface changes in `../src` and public-demo adaptations in the hardening script. Hardening fails on unexpected source structure, so a future sync cannot silently restore live mode.
+
+The build publishes `/studio/build.json` with the package version and SHA-256 fingerprint of the frontend source. Compare it with `dist/studio/build.json` after deployment to verify the website is serving the intended build. Rebuilding locally does not update the public site; publish the new `dist/` through the existing Cloudflare deployment.

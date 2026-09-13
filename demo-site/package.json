@@ -5,8 +5,8 @@
   "type": "module",
   "packageManager": "pnpm@11.17.0",
   "scripts": {
-    "dev": "node scripts/harden-studio-demo.mjs && vite --host 127.0.0.1",
-    "build": "node scripts/harden-studio-demo.mjs && vite build",
+    "dev": "node scripts/sync-studio-preview.mjs && vite --host 127.0.0.1",
+    "build": "node scripts/sync-studio-preview.mjs && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "test:demo": "node --test scripts/tests/static-demo.test.mjs"
   },
@@ -54,7 +54,8 @@
     "remark-gfm": "^4.0.1",
     "tailwind-merge": "^3.6.0",
     "three": "^0.185.1",
-    "vite": "8.2.2"
+    "vite": "8.2.2",
+    "@xyflow/react": "^12.11.6"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",

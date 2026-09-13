@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { Trash2 } from "lucide-react";
 import {
   closestCenter,
   DndContext,
@@ -28,12 +29,9 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Virtualizer as DiffsVirtualizer } from "@pierre/diffs";
 import {
   File,
-  VirtualizerContext,
   WorkerPoolContextProvider,
-  type VirtualFileMetrics,
   type WorkerInitializationRenderOptions,
   type WorkerPoolOptions,
 } from "@pierre/diffs/react";
@@ -100,24 +98,15 @@ function TextCheckGlyph(props: InlineRegistryIconProps) {
   return <CaptionsIcon {...props} />;
 }
 export type SchemaBuilderScalarType =
-  | "string"
-  | "number"
-  | "integer"
-  | "boolean"
-  | "null";
+  "string" | "number" | "integer" | "boolean" | "null";
 export type SchemaBuilderFieldType =
-  | SchemaBuilderScalarType
-  | "object"
-  | "array"
-  | "enum";
+  SchemaBuilderScalarType | "object" | "array" | "enum";
 export type SchemaBuilderArrayScalarType = Exclude<
   SchemaBuilderScalarType,
   "null"
 >;
 export type SchemaBuilderArrayItemType =
-  | SchemaBuilderArrayScalarType
-  | "object"
-  | "enum";
+  SchemaBuilderArrayScalarType | "object" | "enum";
 export type SchemaBuilderEnumValue = {
   id: string;
   value: string;
@@ -245,8 +234,7 @@ const TYPE_LABELS: Record<
   "array-object": "Array<object>",
 };
 type SchemaBuilderTypeStyleKey =
-  | SchemaBuilderFieldType
-  | `array-${SchemaBuilderArrayItemType}`;
+  SchemaBuilderFieldType | `array-${SchemaBuilderArrayItemType}`;
 const TYPE_STYLES: Record<
   SchemaBuilderTypeStyleKey,
   {
@@ -329,16 +317,6 @@ const CODE_FILE_THEME = {
   "--diffs-font-size": "0.8rem",
   "--diffs-line-height": "1.625",
 } as React.CSSProperties;
-const CODE_FONT_SIZE_PX = 12.8;
-const CODE_LINE_HEIGHT_PX = CODE_FONT_SIZE_PX * 1.625;
-const CODE_VIRTUAL_FILE_METRICS = {
-  hunkLineCount: 50,
-  lineHeight: CODE_LINE_HEIGHT_PX,
-  diffHeaderHeight: 44,
-  spacing: 8,
-  paddingTop: 0,
-  paddingBottom: 8,
-} satisfies VirtualFileMetrics;
 const CODE_HIGHLIGHTER_OPTIONS = {
   theme: {
     light: "pierre-light-soft",
@@ -352,70 +330,6 @@ const CODE_WORKER_POOL_OPTIONS = {
       type: "module",
     }),
 } satisfies WorkerPoolOptions;
-function ScrollAreaVirtualizer({
-  children,
-  className,
-  contentClassName,
-  contentStyle,
-  scrollFade = true,
-}: {
-  children: React.ReactNode;
-  className?: string;
-  contentClassName?: string;
-  contentStyle?: React.CSSProperties;
-  scrollFade?: boolean;
-}) {
-  const [virtualizer] = React.useState(() =>
-    typeof window !== "undefined" ? new DiffsVirtualizer() : undefined,
-  );
-  const viewportRef = React.useRef<HTMLDivElement | null>(null);
-  const contentRef = React.useRef<HTMLDivElement | null>(null);
-  const syncVirtualizer = React.useCallback(() => {
-    if (!virtualizer) return;
-    const viewport = viewportRef.current;
-    const content = contentRef.current;
-    if (viewport && content) {
-      virtualizer.setup(viewport, content);
-      return;
-    }
-    virtualizer.cleanUp();
-  }, [virtualizer]);
-  const setViewportRef = React.useCallback(
-    (node: HTMLDivElement | null) => {
-      viewportRef.current = node;
-      syncVirtualizer();
-    },
-    [syncVirtualizer],
-  );
-  const setContentRef = React.useCallback(
-    (node: HTMLDivElement | null) => {
-      contentRef.current = node;
-      syncVirtualizer();
-    },
-    [syncVirtualizer],
-  );
-  React.useEffect(() => {
-    return () => virtualizer?.cleanUp();
-  }, [virtualizer]);
-  return (
-    <VirtualizerContext.Provider value={virtualizer}>
-      <InlineScrollArea2
-        className={className}
-        scrollFade={scrollFade}
-        scrollbarOverflowOnly
-        viewportRef={setViewportRef}
-      >
-        <div
-          ref={setContentRef}
-          className={contentClassName}
-          style={contentStyle}
-        >
-          {children}
-        </div>
-      </InlineScrollArea2>
-    </VirtualizerContext.Provider>
-  );
-}
 const subscribeToHydration = () => () => {};
 function useResolvedCodeThemeType(theme?: SchemaBuilderTheme) {
   const { resolvedTheme } = useTheme();
@@ -1274,6 +1188,38 @@ function InlineTextInput({
     />
   );
 }
+function InlineDescriptionInput(
+  props: React.TextareaHTMLAttributes<HTMLTextAreaElement>,
+) {
+  const ref = React.useRef<HTMLTextAreaElement>(null);
+  React.useLayoutEffect(() => {
+    const input = ref.current;
+    if (!input) return;
+    const resize = () => {
+      input.style.height = "auto";
+      input.style.height = `${input.scrollHeight}px`;
+    };
+    resize();
+    let width = input.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (input.clientWidth !== width) {
+        width = input.clientWidth;
+        resize();
+      }
+    });
+    observer.observe(input);
+    return () => observer.disconnect();
+  }, [props.value]);
+  return (
+    <textarea
+      {...props}
+      ref={ref}
+      rows={1}
+      className="schema-description-input"
+    />
+  );
+}
+
 function EnumEditor({
   values,
   onChange,
@@ -1333,6 +1279,9 @@ function EnumEditor({
                   key={value.id}
                   value={value}
                   onValueChange={updateValue}
+                  onRemove={() =>
+                    onChange(values.filter((item) => item.id !== value.id))
+                  }
                 />
               ))}
               <tr>
@@ -1357,7 +1306,9 @@ function EnumEditor({
 const SortableEnumRow = React.memo(function SortableEnumRow({
   value,
   onValueChange,
+  onRemove,
 }: {
+  onRemove: () => void;
   value: SchemaBuilderEnumValue;
   onValueChange: (
     id: string,
@@ -1416,8 +1367,8 @@ const SortableEnumRow = React.memo(function SortableEnumRow({
           />
         </div>
       </td>
-      <td className="border-l p-0 align-top">
-        <InlineTextInput
+      <td className="relative border-l p-0 align-top">
+        <InlineDescriptionInput
           value={value.description}
           aria-label={`Description for enum ${value.value || "new value"}`}
           placeholder="When the reviewer accepts the extracted value."
@@ -1428,6 +1379,15 @@ const SortableEnumRow = React.memo(function SortableEnumRow({
             }))
           }
         />
+        <button
+          type="button"
+          className="schema-remove-row"
+          aria-label={`Remove enum value ${value.value || "empty value"}`}
+          title="Remove enum value"
+          onClick={onRemove}
+        >
+          <Trash2 size={14} />
+        </button>
       </td>
     </tr>
   );
@@ -1569,6 +1529,9 @@ function SchemaBuilderTable({
       );
     },
   );
+  const removeProperty = useStableCallback((id: string) => {
+    onPropertiesChange(properties.filter((property) => property.id !== id));
+  });
   const addProperty = React.useCallback(() => {
     onPropertiesChange([...properties, createProperty()]);
   }, [onPropertiesChange, properties]);
@@ -1612,6 +1575,7 @@ function SchemaBuilderTable({
                 nestedEditorOpenByPropertyId={nestedEditorOpenByPropertyId}
                 onNestedEditorOpenChange={onNestedEditorOpenChange}
                 onPropertyChange={updateProperty}
+                onPropertyRemove={removeProperty}
               />
             </React.Fragment>
           ))}
@@ -1646,6 +1610,7 @@ const SortablePropertyRows = React.memo(function SortablePropertyRows({
   nestedEditorOpenByPropertyId,
   onNestedEditorOpenChange,
   onPropertyChange,
+  onPropertyRemove,
 }: {
   property: SchemaBuilderProperty;
   depth: number;
@@ -1653,6 +1618,7 @@ const SortablePropertyRows = React.memo(function SortablePropertyRows({
   nestedEditorOpenByPropertyId: Record<string, boolean>;
   onNestedEditorOpenChange: (propertyId: string, open: boolean) => void;
   onPropertyChange: (id: string, property: SchemaBuilderProperty) => void;
+  onPropertyRemove: (id: string) => void;
 }) {
   const {
     attributes,
@@ -1725,8 +1691,8 @@ const SortablePropertyRows = React.memo(function SortablePropertyRows({
         <td className="border-l p-1 align-top">
           <SchemaTypeMenu property={property} onChange={handlePropertyChange} />
         </td>
-        <td className="border-l p-0 align-top">
-          <InlineTextInput
+        <td className="relative border-l p-0 align-top">
+          <InlineDescriptionInput
             value={property.description}
             aria-label={`Description for ${property.key || "new property"}`}
             placeholder="Describe what this field should extract."
@@ -1737,6 +1703,15 @@ const SortablePropertyRows = React.memo(function SortablePropertyRows({
               })
             }
           />
+          <button
+            type="button"
+            className="schema-remove-row"
+            aria-label={`Remove field ${property.key || "new property"}`}
+            title="Remove field"
+            onClick={() => onPropertyRemove(property.id)}
+          >
+            <Trash2 size={14} />
+          </button>
         </td>
       </tr>
       {hasNestedEditor ? (
@@ -2042,16 +2017,14 @@ export const SchemaJsonView = React.memo(function SchemaJsonView({
         poolOptions={CODE_WORKER_POOL_OPTIONS}
         highlighterOptions={CODE_HIGHLIGHTER_OPTIONS}
       >
-        <ScrollAreaVirtualizer
+        <InlineScrollArea2
           key={`${file.cacheKey}:${codeThemeType}:${String(scrollResetKey)}`}
           className="h-full min-w-0"
-          contentClassName="min-w-full"
         >
           <File
             key={`${file.cacheKey}:${codeThemeType}`}
             className="block min-w-full"
             file={file}
-            metrics={CODE_VIRTUAL_FILE_METRICS}
             style={CODE_FILE_THEME}
             options={{
               disableFileHeader: true,
@@ -2063,7 +2036,7 @@ export const SchemaJsonView = React.memo(function SchemaJsonView({
               },
             }}
           />
-        </ScrollAreaVirtualizer>
+        </InlineScrollArea2>
       </WorkerPoolContextProvider>
     </div>
   );

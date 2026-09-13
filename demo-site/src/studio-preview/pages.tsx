@@ -1,4 +1,14 @@
-import { useState } from "react";
+import { HillLoop } from "./hill-loop";
+import { HillSuggestions } from "./hill-suggestions-panel";
+import { applySuggestion } from "./hill-suggestions";
+import { workspaceId, defaultWorkspaceId } from "./workspace-context";
+import { ModelSettingsForm } from "./model-settings-form";
+import { CredentialSettings } from "./credential-settings";
+import { settingsAfterModelChange } from "./model-settings";
+import { ModelPicker, builtinModels } from "./model-picker";
+import { isLowConfidence } from "./confidence";
+import { FieldSelect } from "./components/field-select";
+import { useEffect, useState } from "react";
 import {
   ArrowDownToLine,
   ArrowRight,
@@ -196,12 +206,13 @@ export function Overview() {
   const best = s.runs
     .filter((r) => r.score !== null)
     .sort((a, b) => b.score! - a.score!)[0];
-  const low = s.documents
+  const low = s.reviewDocuments
     .filter((d) => s.mode === "demo" || d.runId)
     .flatMap((d) =>
       d.fields.filter(
         (f) =>
-          f.confidence < 0.9 &&
+          (isLowConfidence(f) ||
+            (f.status && !["correct", "unscored"].includes(f.status))) &&
           !s.reviews.some(
             (r) =>
               r.documentId === d.id &&
@@ -246,6 +257,9 @@ export function Overview() {
           Connect your stack
           <ArrowUpRight size={16} />
         </button>
+        {s.mode === "live" && s.documents.length === 0 && (
+          <button onClick={s.demo}>Explore sample <ArrowRight size={16} /></button>
+        )}
         <div className="banner-art" aria-hidden="true">
           <span />
           <span />
@@ -407,7 +421,7 @@ export function RunsTable({
             <th>Experiment</th>
             <th>Model</th>
             <th>Field accuracy</th>
-            <th>Latency</th>
+            <th>Avg. latency / doc</th>
             <th>Status</th>
             <th />
           </tr>
@@ -490,57 +504,69 @@ export function ConfigForm({
   config,
   onChange,
   showSchema = true,
+  collapseModelSettings = false,
 }: {
   config: Config;
   onChange: (c: Config) => void;
   showSchema?: boolean;
+  collapseModelSettings?: boolean;
 }) {
-  const patch = (p: Partial<Config>) => onChange({ ...config, ...p });
+  const s = useStudio();
+  const patch = (p: Partial<Config>) => onChange({
+    ...config, ...p,
+    ...((p.provider !== undefined && p.provider !== config.provider) || (p.model !== undefined && p.model !== config.model)
+      ? { modelSettings: p.provider === "local" ? {} : settingsAfterModelChange(config.modelSettings) } : {}),
+  });
   return (
     <div className="config-form">
       <div className="form-row">
         <label>
           Model provider
-          <select
+          <FieldSelect
             value={config.provider}
-            onChange={(e) =>
+            onValueChange={(value) =>
               patch({
-                provider: e.target.value,
-                model: (
-                  {
-                    local: "deterministic-local",
-                    openai: "gpt-4.1",
-                    anthropic: "claude-sonnet-4-20250514",
-                    google: "gemini-2.5-flash",
-                    ollama: "qwen3:8b",
-                    "openai-compatible": "custom-model",
-                  } as Record<string, string>
-                )[e.target.value],
+                provider: value,
+                baseUrl:
+                  s.adapters?.llm.find((p) => p.id === value)
+                    ?.default_endpoint || config.baseUrl,
+                model:
+                  s.adapters?.llm.find((p) => p.id === value)?.models[0] ||
+                  (
+                    {
+                      local: "deterministic-local",
+                      openai: builtinModels("openai")[0],
+                      anthropic: builtinModels("anthropic")[0],
+                      google: builtinModels("google")[0],
+                      ollama: "qwen3:8b",
+                      "openai-compatible": "custom-model",
+                    } as Record<string, string>
+                  )[value] ||
+                  "",
               })
             }
-          >
-            {[
-              ["local", "Local · deterministic"],
-              ["openai", "OpenAI"],
-              ["anthropic", "Anthropic"],
-              ["google", "Google Gemini"],
-              ["ollama", "Ollama"],
-              ["openai-compatible", "OpenAI-compatible endpoint"],
-            ].map(([v, l]) => (
-              <option value={v} key={v}>
-                {l}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Model ID
-          <input
-            value={config.model}
-            onChange={(e) => patch({ model: e.target.value })}
-            placeholder="Enter any model ID"
+            aria-label="Model provider"
+            options={
+              s.mode === "live" && s.adapters
+                ? s.adapters.llm.map((p) => ({ value: p.id, label: p.label }))
+                : [
+                    ["local", "Local · deterministic"],
+                    ["openai", "OpenAI"],
+                    ["anthropic", "Anthropic"],
+                    ["google", "Google Gemini"],
+                    ["ollama", "Ollama"],
+                    ["openai-compatible", "OpenAI-compatible endpoint"],
+                  ].map(([value, label]) => ({ value, label }))
+            }
           />
         </label>
+        <ModelPicker
+          provider={config.provider}
+          endpoint={["ollama", "openai-compatible"].includes(config.provider) ? config.baseUrl : undefined}
+          value={config.model}
+          onChange={(model) => patch({ model })}
+          live={s.mode === "live"}
+        />
       </div>
       {["ollama", "openai-compatible"].includes(config.provider) && (
         <label>
@@ -552,17 +578,27 @@ export function ConfigForm({
           />
         </label>
       )}
+      <ModelSettingsForm initiallyOpen={!collapseModelSettings} provider={config.provider} model={config.model}
+        value={config.modelSettings} onChange={modelSettings => patch({ modelSettings })} />
       <label>
         Document parser
-        <select
+        <FieldSelect
           value={config.parser}
-          onChange={(e) => patch({ parser: e.target.value })}
-        >
-          <option value="native">Native text · local</option>
-          <option value="docling">Docling · local</option>
-          <option value="llama-parse">LlamaParse</option>
-        </select>
+          onValueChange={(value) => patch({ parser: value })}
+          aria-label="Document parser"
+          options={
+            s.mode === "live" && s.adapters
+              ? s.adapters.parsers.map((p) => ({ value: p.id, label: p.label }))
+              : [
+                  { value: "none", label: "Original document · no parser" },
+                  { value: "native", label: "Native text · local" },
+                  { value: "docling", label: "Docling · local" },
+                  { value: "llama-parse", label: "LlamaParse" },
+                ]
+          }
+        />
       </label>
+      {config.parser === "none" && <p className="form-hint">PDF and image input requires a compatible hosted model. Source boxes are model estimates and may be approximate. Fields without a locatable source have no box.</p>}
       <label>
         Extraction instructions
         <textarea
@@ -610,47 +646,47 @@ export function RunModal({
   const [error, setError] = useState("");
   return (
     <Modal
-      title="New evaluation run"
-      description="Test one configuration against a fixed benchmark."
+      title="New experiment"
+      description="Test a model, prompt, or schema change against this group’s benchmark. Reusing a saved configuration adds a run to its existing experiment."
       open={open}
       onClose={onClose}
       wide
     >
       <label>
         Processor configuration
-        <select
+        <FieldSelect
           value={processorId}
-          onChange={(e) => {
-            setProcessorId(e.target.value);
-            const p = s.processors.find((p) => p.id === e.target.value);
+          onValueChange={(value) => {
+            setProcessorId(value);
+            const p = s.processors.find((p) => p.id === value);
             setConfig(structuredClone(p?.config || s.config));
           }}
-        >
-          <option value="">Current playground configuration</option>
-          {s.processors.map((p) => (
-            <option value={p.id} key={p.id}>
-              {p.name} · v{p.version}
-            </option>
-          ))}
-        </select>
+          aria-label="Processor configuration"
+          options={[
+            { value: "", label: "Current playground configuration" },
+            ...s.processors.map((p) => ({
+              value: p.id,
+              label: p.name + " · v" + p.version,
+            })),
+          ]}
+        />
       </label>
       <label>
         Evaluation group
-        <select
+        <FieldSelect
           value={group}
-          onChange={(e) => {
-            setGroup(e.target.value);
-            const g = s.evalGroups.find((g) => g.id === e.target.value);
+          disabled={!!groupId}
+          onValueChange={(value) => {
+            setGroup(value);
+            const g = s.evalGroups.find((g) => g.id === value);
             if (g) setDataset(g.datasetId);
           }}
-        >
-          {s.evalGroups.map((g) => (
-            <option key={g.id} value={g.id}>
-              {g.name}
-            </option>
-          ))}
-          <option value="new">Create a new group…</option>
-        </select>
+          aria-label="Evaluation group"
+          options={[
+            ...s.evalGroups.map((g) => ({ value: g.id, label: g.name })),
+            { value: "new", label: "Create a new group…" },
+          ]}
+        />
       </label>
       {group === "new" && (
         <label>
@@ -668,20 +704,19 @@ export function RunModal({
       </label>
       <label>
         Benchmark dataset
-        <select
+        <FieldSelect
           value={dataset}
           disabled={group !== "new"}
-          onChange={(e) => setDataset(e.target.value)}
-        >
-          <option value="" disabled>
-            Select a dataset
-          </option>
-          {s.datasets.map((d) => (
-            <option value={d.id} key={d.id}>
-              {d.name} ({d.count} documents)
-            </option>
-          ))}
-        </select>
+          onValueChange={(value) => setDataset(value)}
+          aria-label="Benchmark dataset"
+          options={[
+            { value: "", label: "Select a dataset", disabled: true },
+            ...s.datasets.map((d) => ({
+              value: d.id,
+              label: d.name + " (" + d.count + " documents)",
+            })),
+          ]}
+        />
       </label>
       <ConfigForm
         config={config}
@@ -747,128 +782,97 @@ export function RunModal({
 }
 export function HillClimbing() {
   const s = useStudio();
-  const [candidate, setCandidate] = useState("Be explicit about currency");
-  const [config, setConfig] = useState(s.config);
-  const [dataset, setDataset] = useState(s.datasets[0]?.id || "");
+  const [loopActive, setLoopActive] = useState(false);
+  const [candidate, setCandidate] = useState("");
+  const [selectedSuggestion, setSelectedSuggestion] = useState("");
+  const [config, setConfig] = useState(s.runs[0]?.config || s.config);
+  const [dataset, setDataset] = useState(
+    s.runs[0]?.datasetId || s.datasets[0]?.id || "",
+  );
   const [baseline, setBaseline] = useState(s.runs[0]?.id || "");
   const [error, setError] = useState("");
-  const choices = [
-    [
-      "Be explicit about currency",
-      "Separate subtotal, tax, and total. Preserve the original currency.",
-      "Prompt refinement",
-    ],
-    [
-      "Ground every table cell",
-      "Use source evidence for each line item. Do not infer missing cells.",
-      "Grounding",
-    ],
-    [
-      "Try a local model",
-      "Compare an open model with the same schema and benchmark.",
-      "Model comparison",
-    ],
-  ];
   const benchmarkRuns = s.runs.filter((r) => r.datasetId === dataset);
-  const base = benchmarkRuns.find((r) => r.id === baseline) || benchmarkRuns[0];
+  const base = benchmarkRuns.find((r) => r.id === baseline);
+  useEffect(() => {
+    if (!dataset && s.datasets.length) {
+      const first = s.runs[0];
+      setDataset(first?.datasetId || s.datasets[0].id);
+      setBaseline(first?.id || "");
+      setConfig(first?.config || s.config);
+    }
+  }, [dataset, s.datasets, s.runs, s.config]);
+  const [mode, setMode] = useState<"automatic" | "manual">("automatic");
   return (
-    <>
-      <Heading
-        eyebrow="SMALL CHANGES. MEASURABLE PROGRESS."
-        title="Make the next run better."
-        description="One hypothesis at a time. Keep the benchmark fixed, and let the results decide."
-        actions={
-          <Badge tone="green">
-            <Mountain size={13} />
-            Manual experiment loop
-          </Badge>
-        }
-      />
+    <div className="hill-workspace">
+      <Heading title="Hill climbing" description="Improve prompts against a fixed benchmark." />
+      <section className="hill-benchmark" aria-label="Benchmark selection">
+        <label>
+          <FileText size={19} aria-hidden="true" />
+          <span>Dataset
+            <FieldSelect disabled={loopActive || s.busy} value={dataset}
+              onValueChange={(value) => {
+                setDataset(value); setCandidate(""); setSelectedSuggestion(""); setError(""); setBaseline(s.runs.find((r) => r.datasetId === value)?.id || "");
+                setConfig(s.runs.find((r) => r.datasetId === value)?.config || s.config);
+              }}
+              aria-label="Dataset"
+              options={s.datasets.map((d) => ({ value: d.id, label: d.name }))} />
+          </span>
+        </label>
+        <label>
+          <BarChart3 size={19} aria-hidden="true" />
+          <span>Baseline
+            <FieldSelect disabled={loopActive || s.busy} value={base?.id || ""}
+              placeholder="Initial baseline will be evaluated"
+              onValueChange={(value) => {
+                setBaseline(value); setCandidate(""); setSelectedSuggestion(""); setError("");
+                setConfig(s.runs.find((r) => r.id === value)?.config || s.config);
+              }}
+              aria-label="Baseline run"
+              options={[{ value: "", label: "Evaluate a new baseline" }, ...benchmarkRuns.map((r) => ({ value: r.id, label: r.name }))]} />
+          </span>
+        </label>
+        <div className="hill-benchmark-score"><span>Baseline accuracy</span><strong>{pct(base?.score ?? null)}</strong></div>
+      </section>
+      {!dataset && <p className="form-hint">Create a dataset before starting a loop.</p>}
+      <div className="hill-mode-tabs" role="tablist" aria-label="Experiment mode">
+        {(["automatic", "manual"] as const).map((value) => <button key={value} type="button" role="tab"
+          id={`hill-tab-${value}`} aria-controls={`hill-mode-${value}`} aria-selected={mode === value}
+          tabIndex={mode === value ? 0 : -1} onClick={() => setMode(value)}
+          onKeyDown={(event) => {
+            if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+              event.preventDefault();
+              const next = event.key === "Home" ? "automatic" : event.key === "End" ? "manual" : mode === "automatic" ? "manual" : "automatic";
+              setMode(next); document.getElementById(`hill-tab-${next}`)?.focus();
+            }
+          }}>{value === "automatic" ? "Automatic" : "Manual experiment"}{value === "automatic" && loopActive && <span className="hill-live-dot" aria-label="Running" />}</button>)}
+      </div>
+      <div className="hill-mode-panel" role="tabpanel" id="hill-mode-automatic" aria-labelledby="hill-tab-automatic" hidden={mode !== "automatic"}>
+        <HillLoop base={base} datasetId={dataset} config={config}
+          onActiveChange={setLoopActive} onUseBest={(best, runId, datasetId) => {
+            setBaseline(runId); setDataset(datasetId); setConfig(best); setCandidate("Best configuration from automatic hill climbing"); setSelectedSuggestion("");
+            setMode("manual"); s.setMessage("Best configuration loaded into your manual candidate.");
+          }} />
+      </div>
+      <div className="hill-mode-panel" role="tabpanel" id="hill-mode-manual" aria-labelledby="hill-tab-manual" hidden={mode !== "manual"}>
       <div className="hill-grid">
         <div>
-          <section className="panel hill-baseline">
-            <PanelTitle
-              title="01 / Start from a benchmark"
-              description="Compare like for like, every time."
-            />
-            <div className="form-row">
-              <label>
-                Dataset
-                <select
-                  value={dataset}
-                  onChange={(e) => {
-                    setDataset(e.target.value);
-                    setBaseline("");
-                  }}
-                >
-                  {s.datasets.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Baseline run
-                <select
-                  value={base?.id || ""}
-                  onChange={(e) => setBaseline(e.target.value)}
-                >
-                  {benchmarkRuns.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            <div className="baseline-score">
-              <span>
-                <Target size={17} />
-                Baseline accuracy
-              </span>
-              <strong>{pct(base?.score ?? null)}</strong>
-            </div>
-            <PerformanceChart runs={benchmarkRuns} compact />
-          </section>
-          <section className="panel hypotheses">
-            <PanelTitle
-              title="Ideas worth testing"
-              description="Starting points for your next hypothesis."
-            />
-            {choices.map(([name, description, kind]) => (
-              <button
-                className={candidate === name ? "selected" : ""}
-                key={name}
-                onClick={() => {
-                  setCandidate(name);
-                  const next = {
-                    ...config,
-                    prompt: `${config.prompt}\n${description}`,
-                    ...(kind === "Model comparison"
-                      ? { provider: "ollama", model: "qwen3:8b" }
-                      : {}),
-                  };
-                  setConfig(next);
-                  s.updateConfig(next);
-                }}
-              >
-                <span className="hypothesis-icon">
-                  <Sparkles size={17} />
-                </span>
-                <section>
-                  <strong>{name}</strong>
-                  <p>{description}</p>
-                  <small>{kind}</small>
-                </section>
-                {candidate === name ? <Check size={16} /> : <Plus size={16} />}
-              </button>
-            ))}
-          </section>
+          <HillSuggestions
+            key={`${s.mode}:${dataset}:${base?.id || "none"}`}
+            base={base}
+            datasetId={dataset}
+            config={config}
+            selected={selectedSuggestion}
+            onChoose={(idea) => {
+              setCandidate(idea.title);
+              setSelectedSuggestion(idea.id);
+              setConfig(applySuggestion(base?.config || config, idea));
+              setError("");
+            }}
+          />
         </div>
         <section className="panel candidate-panel">
           <PanelTitle
-            title="02 / Shape your candidate"
+            title="Shape your candidate"
             description="A clear hypothesis makes a useful experiment."
             action={<Badge>Draft</Badge>}
           />
@@ -877,14 +881,16 @@ export function HillClimbing() {
               Experiment hypothesis
               <input
                 value={candidate}
-                onChange={(e) => setCandidate(e.target.value)}
+                placeholder="Choose a suggestion or write your hypothesis"
+                onChange={(e) => { setCandidate(e.target.value); setSelectedSuggestion(""); }}
               />
             </label>
             <ConfigForm
               config={config}
+              collapseModelSettings
               onChange={(c) => {
                 setConfig(c);
-                s.updateConfig(c);
+                setSelectedSuggestion("");
               }}
             />
             {error && (
@@ -897,9 +903,11 @@ export function HillClimbing() {
                 ? "Demo mode uses fixed sample scores. No API or model is called."
                 : "Runs synchronously against the local API. Provider credentials are read by your backend."}
             </p>
+            {!candidate.trim() && <p className="form-hint">Choose a suggestion or enter a hypothesis to run a candidate.</p>}
+            {loopActive && <p className="form-hint" role="status">An automatic loop is running. Stop it or wait for it to finish before running a manual candidate.</p>}
             <Button
-              variant="primary full-width"
-              disabled={s.busy || !dataset || !candidate.trim()}
+              variant="full-width"
+              disabled={loopActive || s.busy || !dataset || !candidate.trim()}
               onClick={async () => {
                 try {
                   const schema = JSON.parse(config.schema);
@@ -910,7 +918,12 @@ export function HillClimbing() {
                   setError((e as Error).message);
                   return;
                 }
-                if (await s.benchmark(candidate, dataset, config))
+                if (
+                  await s.benchmark(candidate, dataset, config, {
+                    id: base?.groupId,
+                    processorId: base?.processorId,
+                  })
+                )
                   s.navigate("Evaluations");
               }}
             >
@@ -919,7 +932,7 @@ export function HillClimbing() {
               ) : (
                 <>
                   <Play size={14} />
-                  Run candidate on benchmark
+                  Run this candidate once
                   <ArrowRight size={15} />
                 </>
               )}
@@ -927,7 +940,8 @@ export function HillClimbing() {
           </div>
         </section>
       </div>
-    </>
+      </div>
+    </div>
   );
 }
 export function Datasets() {
@@ -969,6 +983,7 @@ export function Datasets() {
   }
   async function open(d: Dataset) {
     setDetail(d);
+    setMembers([]);
     if (s.mode === "live") {
       try {
         const data = await api.request(`/datasets/${d.id}`);
@@ -1193,12 +1208,18 @@ export function Datasets() {
             ))}
         </div>
         <Button
-          onClick={() =>
-            downloadJson("dataset-manifest.json", {
-              dataset: detail,
-              document_ids: members,
-            })
-          }
+          onClick={async () => {
+            try {
+              const manifest =
+                s.mode === "live"
+                  ? (await api.request(`/datasets/${detail!.id}/manifest`))
+                      .manifest
+                  : { dataset: detail, document_ids: members };
+              downloadJson("dataset-manifest.json", manifest);
+            } catch (e) {
+              s.notifyError(e);
+            }
+          }}
         >
           <Download size={14} />
           Export manifest
@@ -1207,64 +1228,71 @@ export function Datasets() {
     </>
   );
 }
+const settingsTabs = [
+  { id: "connections", label: "Connections" },
+  { id: "defaults", label: "Extraction defaults" },
+  { id: "workspace", label: "Workspace" },
+] as const;
+type SettingsTab = typeof settingsTabs[number]["id"];
+
 export function Settings() {
   const s = useStudio();
+  const [activeTab, setActiveTab] = useState<SettingsTab>("connections");
+  const [credentialRevision, setCredentialRevision] = useState(0);
+  const selectTab = (id: SettingsTab) => {
+    setActiveTab(id);
+    document.getElementById(`settings-tab-${id}`)?.focus();
+  };
   return (
-    <>
-      <Heading
-        eyebrow="BUILT AROUND YOUR STACK"
-        title="Your models. Your machine."
-        description="Choose your provider and parser. Keep the freedom to change either one."
-      />
-      <div className="settings-grid">
-        <section className="panel settings-connection">
+    <div className="settings-page">
+      <Heading title="Settings" description="Connect your stack and set your extraction defaults." />
+      <div className="settings-tabs" role="tablist" aria-label="Settings sections">
+        {settingsTabs.map((tab, index) => (
+          <button key={tab.id} id={`settings-tab-${tab.id}`} type="button" role="tab"
+            aria-selected={activeTab === tab.id} aria-controls={`settings-panel-${tab.id}`}
+            tabIndex={activeTab === tab.id ? 0 : -1}
+            onClick={() => setActiveTab(tab.id)}
+            onKeyDown={event => {
+              const next = event.key === "ArrowRight" ? (index + 1) % settingsTabs.length
+                : event.key === "ArrowLeft" ? (index + settingsTabs.length - 1) % settingsTabs.length
+                : event.key === "Home" ? 0 : event.key === "End" ? settingsTabs.length - 1 : -1;
+              if (next < 0) return;
+              event.preventDefault(); selectTab(settingsTabs[next].id);
+            }}>
+            {tab.label}
+          </button>
+        ))}
+      </div>
+      <div id="settings-panel-connections" role="tabpanel" aria-labelledby="settings-tab-connections"
+        hidden={activeTab !== "connections"} tabIndex={0}>
+        <CredentialSettings live={s.mode === "live"} onSaved={() => setCredentialRevision(value => value + 1)}
+          onDefaults={() => selectTab("defaults")} onWorkspace={() => selectTab("workspace")} />
+      </div>
+      <div id="settings-panel-defaults" role="tabpanel" aria-labelledby="settings-tab-defaults"
+        hidden={activeTab !== "defaults"} tabIndex={0}>
+        <section className="settings-defaults">
+          <div className="settings-section-heading">
+            <div><h2>Extraction defaults</h2><p>Choose the model, parser, and instructions for your next extraction.</p></div>
+            <Button onClick={() => downloadJson("ezpz-configuration.json", s.config)}>
+              <Download size={15} />Export configuration
+            </Button>
+          </div>
+          <div className="candidate-form">
+            <ConfigForm key={credentialRevision} config={s.config} onChange={s.updateConfig} />
+            <div className="saved-caption"><Check size={14} />Saved automatically in this browser</div>
+          </div>
+        </section>
+      </div>
+      <div id="settings-panel-workspace" role="tabpanel" aria-labelledby="settings-tab-workspace"
+        hidden={activeTab !== "workspace"} tabIndex={0}>
+        <section className="settings-connection settings-workspace">
           <PanelTitle title="Demo workspace" description="Explore the studio with sample documents." />
           <div className="connection-row"><span>Current workspace</span><Badge tone="green">Static demo</Badge></div>
           <p>Extractions and evaluation scores are simulated. This site does not connect to a backend or call model providers.</p>
           <div className="settings-buttons"><Button onClick={s.resetDemo}>Reset demo</Button></div>
           <div className="privacy-note"><ShieldCheck size={18} /><p>Files you open stay in this browser. Configuration changes are saved only in local browser storage.</p></div>
         </section>
-        <section className="panel">
-          <PanelTitle
-            title="Default extraction configuration"
-            description="Any supported provider. Any model ID. One consistent workflow."
-          />
-          <div className="candidate-form">
-            <ConfigForm config={s.config} onChange={s.updateConfig} />
-            <div className="saved-caption">
-              <Check size={14} />
-              Saved automatically in this browser
-            </div>
-            <Button
-              onClick={() => downloadJson("ezpz-configuration.json", s.config)}
-            >
-              <Download size={14} />
-              Export configuration
-            </Button>
-          </div>
-        </section>
       </div>
-      <section className="panel providers-panel">
-        <PanelTitle
-          title="A flexible foundation"
-          description="A shared schema and evaluation loop across providers."
-        />
-        <div className="provider-grid">
-          {[
-            ["OpenAI", "Hosted models"],
-            ["Anthropic", "Hosted models"],
-            ["Google", "Hosted models"],
-            ["Ollama", "Open models, locally"],
-            ["Compatible API", "Your own endpoint"],
-          ].map(([name, desc]) => (
-            <div key={name}>
-              <ModelMark provider={name} />
-              <h3>{name}</h3>
-              <p>{desc}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-    </>
+    </div>
   );
 }

@@ -1,4 +1,17 @@
-import { createContext, useContext, useState, type ReactNode } from "react";
+import { workspaceStorage, workspaceId, defaultWorkspaceId, openWorkspace } from "./workspace-context";
+import {
+  withExpectedValues,
+  expectedValues,
+  equalValues,
+} from "./result-model";
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useRef,
+  type ReactNode,
+} from "react";
 import {
   defaultConfig,
   readStored,
@@ -17,6 +30,19 @@ import {
   type Run,
 } from "./domain";
 import * as api from "./api";
+import {
+  evaluationPath,
+  evaluationDocuments,
+  demoEvaluationDocuments,
+} from "./evaluation-model";
+export type ExpectedSaveResult = {
+  ok: boolean;
+  groundTruthSaved: boolean;
+  groundTruthRevision?: number;
+  dataset?: Dataset;
+  alreadyMember?: boolean;
+  error?: string;
+};
 type Review = {
   documentId: string;
   field: string;
@@ -26,11 +52,31 @@ type Review = {
   runId: string;
   at: string;
 };
+const demoSampleDocuments = workspaceId === defaultWorkspaceId ? sampleDocuments : [];
+const demoSampleDatasets = workspaceId === defaultWorkspaceId ? sampleDatasets : [];
+const demoSampleRuns = workspaceId === defaultWorkspaceId ? sampleRuns : [];
+const demoSampleGroups = workspaceId === defaultWorkspaceId ? sampleGroups : [];
+const demoSampleProcessors = workspaceId === defaultWorkspaceId ? sampleProcessors : [];
 function useStore() {
+  const initialDemo = true;
   const [mode] = useState<"demo" | "live">("demo");
+  const [connection, setConnection] = useState<
+    "connecting" | "ready" | "offline"
+  >(initialDemo ? "ready" : "connecting");
+  const [adapters, setAdapters] = useState<api.AdapterCatalog | null>(null);
+  const [reviewDocuments, setReviewDocuments] = useState<Document[]>([]);
+  const [reviewRunId, setReviewRunId] = useState("");
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const connectionAttempt = useRef(0);
+  const reviewAttempt = useRef(0);
+  const documentRequest = useRef(0);
+  const [workspaceRevision, setWorkspaceRevision] = useState(0);
+
   const [page, setPageState] = useState<Page>(() => {
     try {
-      const page = decodeURIComponent(location.hash.slice(1)) as Page;
+      const page = decodeURIComponent(
+        location.hash.slice(1).split("/")[0],
+      ) as Page;
       return [
         "Overview",
         "Configuration",
@@ -48,52 +94,78 @@ function useStore() {
       return "Overview";
     }
   });
-  const [documents, setDocuments] = useState<Document[]>(sampleDocuments);
-  const [datasets, setDatasets] = useState<Dataset[]>(sampleDatasets);
+  const [documents, setDocuments] = useState<Document[]>(
+    initialDemo ? readStored("ezpz-landing-demo-documents", demoSampleDocuments) : [],
+  );
+  const [datasets, setDatasets] = useState<Dataset[]>(
+    initialDemo ? readStored("ezpz-landing-demo-datasets", demoSampleDatasets) : [],
+  );
+  useEffect(() => {
+    if (mode !== "demo") return;
+    // Object URLs are session-only; persist sample documents and editable demo data.
+    workspaceStorage.setItem("ezpz-landing-demo-documents", JSON.stringify(documents.filter(d => !d.src?.startsWith("blob:"))));
+    workspaceStorage.setItem("ezpz-landing-demo-datasets", JSON.stringify(datasets));
+  }, [mode, documents, datasets]);
   const [runs, setRuns] = useState<Run[]>(
-    readStored<Run[]>("ezpz-landing-demo-runs", sampleRuns).map((r) => ({
-      ...sampleRuns.find((sample) => sample.id === r.id),
+    (initialDemo
+      ? readStored<Run[]>("ezpz-landing-demo-runs", demoSampleRuns)
+      : []
+    ).map((r) => ({
+      ...demoSampleRuns.find((sample) => sample.id === r.id),
       ...r,
     })),
   );
   const [evalGroups, setEvalGroups] = useState<EvalGroup[]>(
-    readStored("ezpz-landing-demo-groups", sampleGroups),
+    initialDemo ? readStored("ezpz-landing-demo-groups", demoSampleGroups) : [],
   );
   const [selectedId, setSelectedId] = useState("sample-0");
   const [config, setConfig] = useState<Config>(
-    readStored("ezpz-landing-demo-config", defaultConfig),
+    initialDemo
+      ? readStored("ezpz-landing-demo-config", defaultConfig)
+      : defaultConfig,
   );
   const [reviews, setReviews] = useState<Review[]>(
-    readStored("ezpz-landing-demo-reviews", []),
+    initialDemo ? readStored("ezpz-landing-demo-reviews", []) : [],
   );
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [processors, setProcessors] = useState<Processor[]>(
-    readStored("ezpz-landing-demo-processors", sampleProcessors),
+    initialDemo ? readStored("ezpz-landing-demo-processors", demoSampleProcessors) : [],
   );
   const [activeProcessorId, setActiveProcessorId] = useState<string>(
-    readStored("ezpz-landing-demo-active-processor", ""),
+    initialDemo ? readStored("ezpz-landing-demo-active-processor", "") : "",
   );
   const [configRevision, setConfigRevision] = useState(0);
+  const [configBaseVersion, setConfigBaseVersion] = useState<number>();
   const [newProcessorDraft, setNewProcessorDraft] = useState<Config | null>(
     null,
   );
   const activeProcessor = processors.find((p) => p.id === activeProcessorId);
-  function chooseProcessor(p: Processor, config = p.config) {
+  function chooseProcessor(p: Processor, selectedConfig?: Config) {
+    const config = selectedConfig ?? (mode === "live"
+      ? readStored(`ezpz-live-config:${p.id}`, p.config)
+      : p.config);
     setActiveProcessorId(p.id);
-    if (mode === "demo")
-      localStorage.setItem(
-        "ezpz-landing-demo-active-processor",
-        JSON.stringify(p.id),
-      );
-    updateConfig(structuredClone(config));
+    setConfigBaseVersion(p.version);
+    if (mode === "live") workspaceStorage.setItem(`ezpz-live-config-base:${p.id}`, JSON.stringify(p.version));
+    workspaceStorage.setItem(
+      mode === "demo"
+        ? "ezpz-landing-demo-active-processor"
+        : "ezpz-live-active-processor",
+      JSON.stringify(p.id),
+    );
+    setConfig(structuredClone(config));
+    workspaceStorage.setItem(
+      mode === "demo" ? "ezpz-landing-demo-config" : `ezpz-live-config:${p.id}`,
+      JSON.stringify(config),
+    );
     setConfigRevision((v) => v + 1);
   }
   function persistProcessors(next: Processor[]) {
     setProcessors(next);
     if (mode === "demo")
-      localStorage.setItem("ezpz-landing-demo-processors", JSON.stringify(next));
+      workspaceStorage.setItem("ezpz-landing-demo-processors", JSON.stringify(next));
   }
   async function createProcessor(name: string, description: string, c: Config) {
     setBusy(true);
@@ -156,7 +228,7 @@ function useStore() {
         await api.saveProcessorVersion(activeProcessor.id, config, {
           name: name.trim(),
           description,
-        });
+        }, configBaseVersion);
         next = api.normalizeProcessor(
           (await api.request(`/processors/${activeProcessor.id}`)).processor,
         );
@@ -178,6 +250,8 @@ function useStore() {
           ],
         };
       }
+      setConfigBaseVersion(next.version);
+      if (mode === "live") workspaceStorage.setItem(`ezpz-live-config-base:${next.id}`, JSON.stringify(next.version));
       persistProcessors(processors.map((p) => (p.id === next.id ? next : p)));
       setMessage(`Saved ${next.name} · version ${next.version}.`);
       return true;
@@ -193,6 +267,33 @@ function useStore() {
     navigate("Processors");
   }
   const selected = documents.find((d) => d.id === selectedId) || documents[0];
+  useEffect(() => {
+    const syncPage = () => {
+      try {
+        const next = decodeURIComponent(
+          location.hash.slice(1).split("/")[0],
+        ) as Page;
+        if (
+          [
+            "Overview",
+            "Playground",
+            "Configuration",
+            "Processors",
+            "Datasets",
+            "Evaluations",
+            "Hill climbing",
+            "Review queue",
+            "Settings",
+          ].includes(next)
+        )
+          setPageState(next);
+      } catch {
+        /* Keep the current page for malformed links. */
+      }
+    };
+    window.addEventListener("hashchange", syncPage);
+    return () => window.removeEventListener("hashchange", syncPage);
+  }, []);
   function navigate(p: Page) {
     setPageState(p);
     window.scrollTo({ top: 0, behavior: "instant" });
@@ -200,20 +301,40 @@ function useStore() {
   }
   function updateConfig(c: Config) {
     setConfig(c);
-    localStorage.setItem("ezpz-landing-demo-config", JSON.stringify(c));
+    workspaceStorage.setItem(
+      mode === "demo"
+        ? "ezpz-landing-demo-config"
+        : `ezpz-live-config:${activeProcessorId || "scratch"}`,
+      JSON.stringify(c),
+    );
   }
   function updateDocument(d: Document) {
     setDocuments((ds) => ds.map((x) => (x.id === d.id ? d : x)));
   }
-  async function selectDocument(d: Document) {
+  function selectDocument(d: Document) {
     setSelectedId(d.id);
     if (mode === "live")
-      try {
-        updateDocument(await api.inspectDocument(d));
-      } catch (e) {
-        notifyError(e);
-      }
+      workspaceStorage.setItem("ezpz-live-document", JSON.stringify(d.id));
   }
+  useEffect(() => {
+    if (mode !== "live" || connection !== "ready" || !selectedId) return;
+    const abort = new AbortController();
+    const attempt = ++documentRequest.current;
+    const doc = documents.find((d) => d.id === selectedId);
+    if (doc) {
+      updateDocument({ ...doc, fields: [], runId: undefined, warnings: [] });
+      api
+        .inspectDocument(doc, activeProcessorId, abort.signal)
+        .then((result) => {
+          if (!abort.signal.aborted && attempt === documentRequest.current)
+            updateDocument(result);
+        })
+        .catch((e) => {
+          if (!abort.signal.aborted) notifyError(e);
+        });
+    }
+    return () => abort.abort();
+  }, [selectedId, activeProcessorId, mode, connection, workspaceRevision]);
   function notifyError(e: unknown) {
     setMessage(
       e instanceof Error
@@ -221,18 +342,71 @@ function useStore() {
         : "Something went wrong. Please try again.",
     );
   }
+  async function loadReviewRun(
+    id: string,
+    workspace = documents,
+    live = mode === "live",
+  ) {
+    const attempt = ++reviewAttempt.current;
+    setReviewLoading(true);
+    setReviewDocuments([]);
+    setReviews([]);
+    setReviewRunId(id);
+    try {
+      if (live) {
+        const { run } = await api.request(`/runs/${encodeURIComponent(id)}`);
+        if (attempt !== reviewAttempt.current) return false;
+        setReviewDocuments(evaluationDocuments(run, workspace));
+        setReviews(
+          (run.review_decisions || []).map((r: any) => ({
+            documentId: r.document_id,
+            field: r.field_path,
+            status: r.status,
+            value: r.corrected_value,
+            note: r.note || "",
+            runId: id,
+            at: r.updated_at,
+          })),
+        );
+        workspaceStorage.setItem("ezpz-live-review-run", JSON.stringify(id));
+      } else {
+        const run = runs.find((r) => r.id === id);
+        if (run) setReviewDocuments(demoEvaluationDocuments(run));
+        setReviews(readStored("ezpz-landing-demo-reviews", []));
+      }
+      return true;
+    } catch (e) {
+      if (attempt === reviewAttempt.current) notifyError(e);
+      return false;
+    } finally {
+      if (attempt === reviewAttempt.current) setReviewLoading(false);
+    }
+  }
   async function connect() {
     setMessage("This demo cannot connect to an API. All results use sample data.");
   }
   function demo() {
-    setProcessors(readStored("ezpz-landing-demo-processors", sampleProcessors));
+    if (mode === "live") { openWorkspace(defaultWorkspaceId, true); return; }
+    ++connectionAttempt.current;
+    ++reviewAttempt.current;
+    setReviewLoading(false);
+    setBusy(false);
+    setConnection("ready");
+    setReviewRunId("");
+    setReviewDocuments([]);
+    setConfig(readStored("ezpz-landing-demo-config", defaultConfig));
+    setConfigRevision((v) => v + 1);
+    const url = new URL(location.href);
+    url.searchParams.set("demo", "1");
+    history.replaceState(null, "", url);
+    setProcessors(readStored("ezpz-landing-demo-processors", demoSampleProcessors));
     setActiveProcessorId(readStored("ezpz-landing-demo-active-processor", ""));
-    setDocuments(sampleDocuments);
-    setDatasets(sampleDatasets);
-    setEvalGroups(readStored("ezpz-landing-demo-groups", sampleGroups));
+    setDocuments(demoSampleDocuments);
+    setDatasets(demoSampleDatasets);
+    setEvalGroups(readStored("ezpz-landing-demo-groups", demoSampleGroups));
     setRuns(
-      readStored<Run[]>("ezpz-landing-demo-runs", sampleRuns).map((r) => ({
-        ...sampleRuns.find((sample) => sample.id === r.id),
+      readStored<Run[]>("ezpz-landing-demo-runs", demoSampleRuns).map((r) => ({
+        ...demoSampleRuns.find((sample) => sample.id === r.id),
         ...r,
       })),
     );
@@ -243,19 +417,79 @@ function useStore() {
     );
   }
   function resetDemo() {
-    localStorage.removeItem("ezpz-landing-demo-groups");
-    localStorage.removeItem("ezpz-landing-demo-processors");
-    localStorage.removeItem("ezpz-landing-demo-active-processor");
-    localStorage.removeItem("ezpz-landing-demo-runs");
-    localStorage.removeItem("ezpz-landing-demo-reviews");
-    updateConfig(defaultConfig);
+    workspaceStorage.removeItem("ezpz-landing-demo-documents");
+    workspaceStorage.removeItem("ezpz-landing-demo-datasets");
+    workspaceStorage.removeItem("ezpz-landing-demo-groups");
+    workspaceStorage.removeItem("ezpz-landing-demo-processors");
+    workspaceStorage.removeItem("ezpz-landing-demo-active-processor");
+    workspaceStorage.removeItem("ezpz-landing-demo-runs");
+    workspaceStorage.removeItem("ezpz-landing-demo-reviews");
+    workspaceStorage.removeItem("ezpz-landing-demo-config");
     demo();
     setMessage("Demo reset to the original sample documents and experiments.");
   }
-  async function refresh() {
+  // Read a cheap database revision before refreshing external changes. Config/editor
+  // state stays local; their original version/revision remains the save precondition.
+  const externalRefresh = useRef<(current: () => boolean) => Promise<void>>(async () => {});
+  externalRefresh.current = async (current) => {
+    await refresh(current);
+    if (current()) setWorkspaceRevision(v => v + 1);
+  };
+  useEffect(() => {
+    if (mode !== "live" || connection !== "ready" || busy) return;
+    let stopped = false;
+    let inFlight = false;
+    let revision: number | undefined;
+    const poll = async () => {
+      if (stopped || inFlight || document.visibilityState === "hidden") return;
+      inFlight = true;
+      try {
+        const state = await api.request("/workspace/revision", { signal: AbortSignal.timeout(5000) });
+        if (!stopped && state.revision !== revision) {
+          await externalRefresh.current(() => !stopped);
+          if (!stopped) revision = state.revision;
+        }
+      } catch { /* Keep the current workspace and retry on the next tick. */ }
+      finally { inFlight = false; }
+    };
+    const timer = window.setInterval(poll, 2000);
+    window.addEventListener("focus", poll);
+    void poll();
+    return () => { stopped = true; window.clearInterval(timer); window.removeEventListener("focus", poll); };
+  }, [mode, connection, busy]);
+  const hasRunningEvaluation = runs.some((r) =>
+    ["running", "pausing", "cancelling"].includes(r.status.toLowerCase()),
+  );
+  useEffect(() => {
+    if (mode !== "live" || !hasRunningEvaluation) return;
+    let stopped = false;
+    const poll = async () => {
+      try {
+        const data = await api.request("/runs");
+        if (!stopped) setRuns(data.runs.map(api.normalizeRun));
+      } catch {
+        /* Preserve the last known run state while reconnecting. */
+      }
+    };
+    const timer = window.setInterval(poll, 2000);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [mode, hasRunningEvaluation]);
+  async function refresh(current: () => boolean = () => true) {
     if (mode === "live") {
       const data = await api.loadWorkspace();
+      if (!current()) return;
+      setDocuments((current) =>
+        data.documents.map((d) => ({
+          ...current.find((old) => old.id === d.id),
+          ...d,
+          fields: current.find((old) => old.id === d.id)?.fields || [],
+        })),
+      );
       setRuns(data.runs);
+      setAdapters(data.adapters);
       setDatasets(data.datasets);
       setProcessors(data.processors);
       setEvalGroups(data.evalGroups);
@@ -283,7 +517,7 @@ function useStore() {
         );
       }
       setDocuments((d) => [...added, ...d]);
-      if (added[0]) setSelectedId(added[0].id);
+      if (added[0]) selectDocument(added[0]);
       setUploadOpen(false);
       navigate(page === "Configuration" ? "Configuration" : "Playground");
       setMessage(
@@ -299,6 +533,7 @@ function useStore() {
   }
   async function extract() {
     if (!selected) return null;
+    ++documentRequest.current;
     setBusy(true);
     try {
       if (mode === "demo") {
@@ -306,14 +541,18 @@ function useStore() {
           throw new Error(
             "Your file stays in this browser. Choose a sample document to try the simulated extraction.",
           );
-        const extracted: Document = {
-          ...selected,
-          fields: sampleDocuments.find((d) => d.id === selected.id)!.fields,
-        };
-        updateDocument(extracted);
-        setMessage(
-          "Demo extraction loaded from the sample fixture. No model was called.",
+        const extracted = withExpectedValues(
+          {
+            ...selected,
+            fields: demoSampleDocuments.find((d) => d.id === selected.id)!.fields,
+          },
+          expectedValues(selected),
         );
+        updateDocument(extracted);
+        if (page !== "Configuration")
+          setMessage(
+            "Demo extraction loaded from the sample fixture. No model was called.",
+          );
         return extracted;
       } else {
         let processor = activeProcessor || processors[0];
@@ -326,20 +565,29 @@ function useStore() {
         const result = await api.previewDocument(
           selected,
           config,
-          processor.name,
+          processor.id,
         );
         const extraction = result.extraction || result;
+        const { ground_truth } = await api.request(
+          `/documents/${selected.id}/ground-truth`,
+        );
         const extracted: Document = {
           ...selected,
-          fields: api.extractionFields(extraction),
+          fields: api.extractionFields(extraction, ground_truth),
+          groundTruth: ground_truth?.value || {},
+          groundTruthRevision: ground_truth?.revision || 0,
+          annotationStatus: ground_truth?.annotation_status,
+          annotationAuthor: ground_truth?.author,
           status: "Extracted",
           runId: undefined,
           warnings: extraction.warnings || result.warnings || [],
+          harnessSteps: extraction.result?.provenance?.harness_steps,
         };
         updateDocument(extracted);
-        setMessage(
-          "Extraction preview complete. This preview has not created an evaluation run.",
-        );
+        if (page !== "Configuration")
+          setMessage(
+            "Extraction preview complete. This preview has not created an evaluation run.",
+          );
         return extracted;
       }
     } catch (e) {
@@ -348,6 +596,30 @@ function useStore() {
     } finally {
       setBusy(false);
     }
+  }
+  async function createEvaluationGroup(
+    name: string,
+    datasetId: string,
+    description: string,
+  ) {
+    if (mode === "demo") {
+      const group: EvalGroup = {
+        id: crypto.randomUUID(),
+        name,
+        datasetId,
+        description,
+      };
+      const next = [...evalGroups, group];
+      setEvalGroups(next);
+      workspaceStorage.setItem("ezpz-landing-demo-groups", JSON.stringify(next));
+      return group;
+    }
+    const { eval_group } = await api.request("/eval-groups", {
+      method: "POST",
+      body: JSON.stringify({ name, dataset_id: datasetId, description }),
+    });
+    await refresh();
+    return { id: eval_group.id };
   }
   async function benchmark(
     name: string,
@@ -372,13 +644,13 @@ function useStore() {
           };
           const nextGroups = [...evalGroups, targetGroup];
           setEvalGroups(nextGroups);
-          localStorage.setItem(
+          workspaceStorage.setItem(
             "ezpz-landing-demo-groups",
             JSON.stringify(nextGroups),
           );
         }
         const r: Run = {
-          ...sampleRuns[0],
+          ...demoSampleRuns[0],
           id: crypto.randomUUID(),
           name,
           groupId: targetGroup.id,
@@ -396,24 +668,150 @@ function useStore() {
         };
         const next = [r, ...runs];
         setRuns(next);
-        localStorage.setItem("ezpz-landing-demo-runs", JSON.stringify(next));
+        workspaceStorage.setItem("ezpz-landing-demo-runs", JSON.stringify(next));
         setMessage(
           "Demo run added using a fixed illustrative score. No API or model was called.",
         );
       } else {
-        await api.runBenchmark(datasetId, configuration, name, {
-          ...group,
-          processorId: group?.processorId || activeProcessor?.id,
-        });
+        await api.runBenchmark(
+          datasetId,
+          configuration,
+          name,
+          {
+            ...group,
+            processorId: group?.processorId || activeProcessor?.id,
+          },
+          true,
+        );
         await refresh();
         setMessage(
-          "Benchmark complete. The run and its configuration are saved in the local API.",
+          "Evaluation started. Progress and results are saved in Evaluations.",
         );
       }
       return true;
     } catch (e) {
       notifyError(e);
       return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+  function updateExpectedValues(id: string, value: Record<string, JsonValue>) {
+    setDocuments((ds) =>
+      ds.map((d) => (d.id === id ? withExpectedValues(d, value) : d)),
+    );
+  }
+  async function saveExpectedValues(
+    d: Document,
+    value: Record<string, JsonValue>,
+    target?: { id?: string; name?: string },
+    expectedRevision = d.groundTruthRevision,
+  ): Promise<ExpectedSaveResult> {
+    setMessage("");
+    setBusy(true);
+    ++documentRequest.current; // A pre-save inspection must not restore an older revision.
+    let groundTruthSaved = false;
+    let groundTruthRevision: number | undefined;
+    let dataset: Dataset | undefined;
+    let alreadyMember = false;
+    try {
+      if (mode === "live") {
+        const saved = await api.saveGroundTruth(d.id, value, expectedRevision);
+        if (!equalValues(saved.ground_truth?.value ?? null, value))
+          throw new Error(
+            "The API did not confirm the expected values. Please retry.",
+          );
+        groundTruthSaved = true;
+        groundTruthRevision = saved.ground_truth.revision;
+        setDocuments(ds => ds.map(doc => doc.id === d.id ? { ...withExpectedValues(doc, value), groundTruthRevision, annotationStatus: "complete", annotationAuthor: "local" } : doc));
+        if (target) {
+          if (target.id) {
+            const data = await api.request(
+              `/datasets/${encodeURIComponent(target.id)}`,
+            );
+            dataset = {
+              id: data.dataset.id,
+              name: data.dataset.name,
+              description: data.dataset.description || "",
+              count: data.documents.length,
+              members: data.documents.map((doc: any) => doc.id),
+            };
+            alreadyMember = dataset.members!.includes(d.id);
+          } else {
+            const created = await api.createDataset(target.name!.trim(), []);
+            dataset = {
+              id: created.id,
+              name: created.name,
+              description: created.description || "",
+              count: 0,
+              members: [],
+            };
+            // Keep the created ID even if adding the document fails, so retry cannot create another dataset.
+            setDatasets((ds) => [
+              ...ds.filter((item) => item.id !== dataset!.id),
+              dataset!,
+            ]);
+          }
+          // An existing member only needs its ground truth updated; preserve its split and tags.
+          if (!alreadyMember) await api.addDatasetDocument(dataset.id, d.id);
+          const { manifest } = await api.request(
+            `/datasets/${encodeURIComponent(dataset.id)}/manifest`,
+          );
+          const member = manifest.documents.find(
+            (doc: any) => doc.document_id === d.id,
+          );
+          if (!member || !equalValues(member.ground_truth, value))
+            throw new Error(
+              "Could not verify this document and its expected values in the dataset. Please retry.",
+            );
+          dataset = {
+            ...dataset,
+            count: manifest.documents.length,
+            members: manifest.documents.map((doc: any) => doc.document_id),
+          };
+          setDatasets((ds) => [
+            ...ds.filter((item) => item.id !== dataset!.id),
+            dataset!,
+          ]);
+        }
+      } else {
+        updateExpectedValues(d.id, value);
+        groundTruthSaved = true;
+        if (target) {
+          const current = datasets.find((item) => item.id === target.id);
+          if (target.id && !current)
+            throw new Error("Dataset not found. Choose another dataset.");
+          const members =
+            current?.members ||
+            (current
+              ? documents
+                  .filter((doc) => doc.sample)
+                  .slice(0, current.count)
+                  .map((doc) => doc.id)
+              : []);
+          alreadyMember = members.includes(d.id);
+          const nextMembers = [...new Set([...members, d.id])];
+          dataset = {
+            id: current?.id || crypto.randomUUID(),
+            name: current?.name || target.name!.trim(),
+            description: current?.description || "Added from expected values",
+            count: nextMembers.length,
+            members: nextMembers,
+          };
+          setDatasets((ds) => [
+            ...ds.filter((item) => item.id !== dataset!.id),
+            dataset!,
+          ]);
+        }
+      }
+      return { ok: true, groundTruthSaved, groundTruthRevision, dataset, alreadyMember };
+    } catch (e) {
+      const reason = e instanceof Error ? e.message : "Please try again.";
+      const error = groundTruthSaved
+        ? `Ground truth was saved, but the dataset operation could not be confirmed. ${reason}`
+        : `Ground truth could not be saved. ${reason}`;
+      setMessage(error);
+      return { ok: false, groundTruthSaved, groundTruthRevision, dataset, alreadyMember, error };
     } finally {
       setBusy(false);
     }
@@ -451,7 +849,7 @@ function useStore() {
       ];
       setReviews(next);
       if (mode === "demo")
-        localStorage.setItem("ezpz-landing-demo-reviews", JSON.stringify(next));
+        workspaceStorage.setItem("ezpz-landing-demo-reviews", JSON.stringify(next));
       setMessage("Review saved. The original extraction remains preserved.");
       return true;
     } catch (e) {
@@ -463,6 +861,15 @@ function useStore() {
   }
   return {
     mode,
+    updateExpectedValues,
+    saveExpectedValues,
+    connection,
+    adapters,
+    reviewDocuments:
+      mode === "demo" && !reviewRunId ? documents : reviewDocuments,
+    reviewRunId,
+    reviewLoading,
+    loadReviewRun,
     page,
     navigate,
     documents,
@@ -504,6 +911,7 @@ function useStore() {
     demo,
     resetDemo,
     refresh,
+    createEvaluationGroup,
     notifyError,
     updateDocument,
   };

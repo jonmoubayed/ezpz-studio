@@ -1,0 +1,8 @@
+.model-picker { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.model-picker > .field-select-trigger, .model-picker > input { width: 100%; min-width: 0; }
+.model-picker .model-refresh { align-self: flex-start; white-space: normal; text-align: left; }
+.model-catalog-status { margin: 0; font-size: 12px; line-height: 1.5; color: var(--muted, #68756d); overflow-wrap: anywhere; }
+.model-refresh-spinning { animation: model-refresh-spin 1s linear infinite; }
+@keyframes model-refresh-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .model-refresh-spinning { animation: none; } }
+@media (max-width: 600px) { .config-form .form-row:has(.model-picker) { display: flex; flex-direction: column; } }
