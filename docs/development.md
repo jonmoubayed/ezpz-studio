@@ -53,6 +53,11 @@ Release assets are staged under `backend/studio/`; wheels and source archives go
 in `release/`. They are not needed for daily development and are not committed.
 CI retains existing browser, container, architecture, and clean-install checks.
 
+Portable Docker bundles pin their Compose file to the exact image included in
+the archive. Both launchers disable registry pulls; the source checkout's
+`EZPZ_IMAGE` override does not replace a bundle's image. Installer checks verify
+the configured image and the running container's image ID before checking readiness.
+
 The public demo lives in `demo-site/`. Its build refreshes the demo from the
 live `src/` tree automatically. To preview and validate it:
 
