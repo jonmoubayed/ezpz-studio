@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ezpz-evals"
-version = "0.1.0b1"
+version = "0.1.5"
 description = "Local-first document extraction evaluation service"
 readme = "README.md"
 license = {file = "LICENSE"}

@@ -1,0 +1,617 @@
+[
+  {
+    "title": "BOLIVARMININGCORP_05_23_2003-EX-2.1-VISP WEB SITE BUILDING AND HOSTING AGREEMENT",
+    "kind": "Hosting",
+    "family": "bolivarminingcorp",
+    "review": {
+      "vendor": "YourNetPlus.com, Inc.",
+      "autoRenew": "yes",
+      "months": "12"
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "CENTRACKINTERNATIONALINC_10_29_1999-EX-10.3-WEB SITE HOSTING AGREEMENT",
+    "kind": "Hosting",
+    "family": "centrackinternationalinc",
+    "review": {
+      "vendor": "i-on interactive",
+      "autoRenew": "yes",
+      "months": "1"
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted.",
+    "extra_references": [
+      {
+        "field": "amount",
+        "value": "450",
+        "excerpt": "The Customer is responsible for paying i-on the recurring monthly fee in the amount of $450.",
+        "status_only": false
+      },
+      {
+        "field": "billing",
+        "value": "monthly",
+        "excerpt": "The Customer is responsible for paying i-on the recurring monthly fee in the amount of $450.",
+        "status_only": false
+      }
+    ]
+  },
+  {
+    "title": "WEBHELPCOMINC_03_22_2000-EX-10.8-HOSTING AGREEMENT",
+    "kind": "Hosting",
+    "family": "webhelpcominc",
+    "review": {
+      "vendor": "eGain Communications Corporation",
+      "autoRenew": "yes",
+      "months": "12"
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted.",
+    "extra_references": [
+      {
+        "field": "method",
+        "value": null,
+        "excerpt": "Notices under this Agreement shall be in writing, addressed to the party at its last-provided address, and shall be deemed given when delivered personally, or by e-mail (with confirmation of receipt) or conventional mail (registered or certified, postage prepaid with return receipt requested).",
+        "status_only": true
+      },
+      {
+        "field": "conditions",
+        "value": null,
+        "excerpt": "Notices under this Agreement shall be in writing, addressed to the party at its last-provided address, and shall be deemed given when delivered personally, or by e-mail (with confirmation of receipt) or conventional mail (registered or certified, postage prepaid with return receipt requested).",
+        "status_only": true
+      }
+    ]
+  },
+  {
+    "title": "AMERICASSHOPPINGMALLINC_12_10_1999-EX-10.2-SITE DEVELOPMENT AND HOSTING AGREEMENT",
+    "kind": "Hosting",
+    "family": "americasshoppingmallinc",
+    "review": {
+      "vendor": "Hanover Direct, Inc.",
+      "autoRenew": "yes",
+      "months": "12"
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "BNCMORTGAGEINC_05_17_1999-EX-10.4-LICENSING AND WEB SITE HOSTING AGREEMENT",
+    "kind": "Hosting",
+    "family": "bncmortgageinc",
+    "review": {
+      "vendor": "TrueLink, Inc.",
+      "autoRenew": "yes",
+      "months": "12"
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted.",
+    "extra_references": [
+      {
+        "field": "recipient",
+        "value": null,
+        "excerpt": "All notices required or permitted to be sent under this Agreement shall be in writing and shall be sent to the parties at the addresses set forth in the preamble of this Agreement, or to such other addresses and to such other individuals of which either party may notify the other in a notice which complies with the provisions of this subsection.",
+        "status_only": true
+      },
+      {
+        "field": "method",
+        "value": null,
+        "excerpt": "All notices will be deemed given (i) when delivered by hand, (ii) one (l) day after delivery to a reputable overnight carrier, or (iii) three (3) days after placement in first-class mail, postage prepaid, return receipt requested.",
+        "status_only": true
+      },
+      {
+        "field": "conditions",
+        "value": null,
+        "excerpt": "All notices will be deemed given (i) when delivered by hand, (ii) one (l) day after delivery to a reputable overnight carrier, or (iii) three (3) days after placement in first-class mail, postage prepaid, return receipt requested.",
+        "status_only": true
+      }
+    ]
+  },
+  {
+    "title": "BLUEFLYINC_03_27_2002-EX-10.27-e-business Hosting Agreement",
+    "kind": "Hosting",
+    "family": "blueflyinc",
+    "review": {
+      "vendor": "International Business Machines Corporation",
+      "autoRenew": "yes"
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "VitalibisInc_20180316_8-K_EX-10.2_11100168_EX-10.2_Hosting Agreement",
+    "kind": "Hosting",
+    "family": "vitalibisinc",
+    "review": {
+      "vendor": "VOTOCAST, Inc.",
+      "autoRenew": "yes",
+      "months": "12"
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted.",
+    "extra_references": [
+      {
+        "field": "billing",
+        "value": "monthly",
+        "excerpt": "License and Hosting Fees will be billed after each month, based on the Total Number of Videos Views for that month.",
+        "status_only": false
+      }
+    ]
+  },
+  {
+    "title": "CORIOINC_07_20_2000-EX-10.5-LICENSE AND HOSTING AGREEMENT",
+    "kind": "Hosting",
+    "family": "corioinc",
+    "review": {
+      "vendor": "Commerce One, Inc.",
+      "autoRenew": "yes",
+      "months": "12"
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "DYNTEKINC_07_30_1999-EX-10-ONLINE HOSTING AGREEMENT",
+    "kind": "Hosting",
+    "family": "dyntekinc",
+    "review": {
+      "vendor": "Tadeo E-Commerce Corp.",
+      "autoRenew": "no",
+      "months": "12"
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "PareteumCorp_20081001_8-K_EX-99.1_2654808_EX-99.1_Hosting Agreement",
+    "kind": "Hosting",
+    "family": "pareteumcorp",
+    "review": {
+      "autoRenew": "yes"
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "GALACTICOMMTECHNOLOGIESINC_11_07_1997-EX-10.46-WEB HOSTING AGREEMENT",
+    "kind": "Hosting",
+    "family": "galacticommtechnologiesinc",
+    "review": {
+      "vendor": "Galacticomm"
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "BANGIINC_05_25_2005-EX-10-Premium Managed Hosting Agreement",
+    "kind": "Hosting",
+    "family": "bangiinc",
+    "review": {
+      "vendor": "deep systems",
+      "months": "12"
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "Freecook_20180605_S-1_EX-10.3_11233807_EX-10.3_Hosting Agreement",
+    "kind": "Hosting",
+    "family": "freecook",
+    "review": {
+      "vendor": "Mitchell's Web Advance, PLC"
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "REGANHOLDINGCORP_03_31_2008-EX-10-LICENSE AND HOSTING AGREEMENT",
+    "kind": "Hosting",
+    "family": "reganholdingcorp",
+    "review": {
+      "vendor": "Legacy Marketing Group, Inc."
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "QuantumGroupIncFl_20090120_8-K_EX-99.2_3672910_EX-99.2_Hosting Agreement",
+    "kind": "Hosting",
+    "family": "quantumgroupincfl",
+    "review": {
+      "vendor": "International Business Machines Corporation"
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "INKTOMICORP_06_08_1998-EX-10.14-SOFTWARE HOSTING AGREEMENT",
+    "kind": "Hosting",
+    "family": "inktomicorp",
+    "review": {
+      "vendor": "INKTOMI CORPORATION"
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "XACCT Technologies, Inc.SUPPORT AND MAINTENANCE AGREEMENT",
+    "kind": "Maintenance",
+    "family": "xacct technologies, inc.support and maintenance agreement",
+    "review": {
+      "vendor": "XACCT Technologies, Inc.",
+      "autoRenew": "yes",
+      "months": "12",
+      "uplift_present": true
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "UAGHINC_04_14_2004-EX-10.18-MAINTENANCE AGREEMENT",
+    "kind": "Maintenance",
+    "family": "uaghinc",
+    "review": {
+      "vendor": "CityNet Telecommunications, Inc.",
+      "autoRenew": "yes",
+      "months": "1"
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "IMAGEWARESYSTEMSINC_12_20_1999-EX-10.22-MAINTENANCE AGREEMENT",
+    "kind": "Maintenance",
+    "family": "imagewaresystemsinc",
+    "review": {
+      "vendor": "XIMAGE",
+      "autoRenew": "yes",
+      "months": "12",
+      "uplift_present": true
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "SPIENERGYCO,LTD_03_09_2011-EX-99.5-OPERATIONS AND MAINTENANCE AGREEMENT",
+    "kind": "Maintenance",
+    "family": "spienergyco,ltd",
+    "review": {
+      "vendor": "Solar Power, Inc.",
+      "autoRenew": "yes",
+      "months": "12"
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "NETZEEINC_11_14_2002-EX-10.3-MAINTENANCE AGREEMENT",
+    "kind": "Maintenance",
+    "family": "netzeeinc",
+    "review": {
+      "vendor": "Netzee",
+      "autoRenew": "no",
+      "months": "12",
+      "uplift_present": true
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "CardlyticsInc_20180112_S-1_EX-10.16_11002987_EX-10.16_Maintenance Agreement4",
+    "kind": "Maintenance",
+    "family": "cardlyticsinc",
+    "review": {
+      "vendor": "Cardlytics",
+      "autoRenew": "yes",
+      "months": "12"
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "TRIZETTOGROUPINC_08_18_1999-EX-10.17-TECHNICAL INFRASTRUCTURE MAINTENANCE AGREEMENT",
+    "kind": "Maintenance",
+    "family": "trizettogroupinc",
+    "review": {
+      "vendor": "MEDICAL MANAGER MIDWEST, INC."
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "SPARKLINGSPRINGWATERHOLDINGSLTD_07_03_2002-EX-10.13-SOFTWARE LICENSE AND MAINTENANCE AGREEMENT",
+    "kind": "Maintenance",
+    "family": "sparklingspringwaterholdingsltd",
+    "review": {
+      "vendor": "GARMAN ROUTING SYSTEMS, INC.",
+      "months": "12"
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "SFGFINANCIALCORP_05_12_2009-EX-10.1-SOFTWARE LICENSE AND MAINTENANCE AGREEMENT",
+    "kind": "Maintenance",
+    "family": "sfgfinancialcorp",
+    "review": {
+      "vendor": "SFG Financial Corp",
+      "autoRenew": "no",
+      "months": "84"
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "CardlyticsInc_20180112_S-1_EX-10.16_11002987_EX-10.16_Maintenance Agreement3",
+    "kind": "Maintenance",
+    "family": "cardlyticsinc",
+    "review": {
+      "vendor": "Cardlytics, Inc."
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "HerImports_20161018_8-KA_EX-10.14_9765707_EX-10.14_Maintenance Agreement",
+    "kind": "Maintenance",
+    "family": "herimports",
+    "review": {
+      "vendor": "Leader Act Ltd HK"
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted.",
+    "extra_references": [
+      {
+        "field": "method",
+        "value": null,
+        "excerpt": "All notices, requests, demands, and other communications required or permitted hereunder will be in writing and will be deemed to have been duly given when delivered by hand, by overnight courier, or fax, or two days after being mailed by certified or registered mail, return receipt requested, with postage prepaid.",
+        "status_only": true
+      },
+      {
+        "field": "conditions",
+        "value": null,
+        "excerpt": "All notices, requests, demands, and other communications required or permitted hereunder will be in writing and will be deemed to have been duly given when delivered by hand, by overnight courier, or fax, or two days after being mailed by certified or registered mail, return receipt requested, with postage prepaid.",
+        "status_only": true
+      }
+    ]
+  },
+  {
+    "title": "AzulSa_20170303_F-1A_EX-10.3_9943903_EX-10.3_Maintenance Agreement2",
+    "kind": "Maintenance",
+    "family": "azulsa",
+    "review": {
+      "vendor": "AVIONS DE TRANSPORT REGIONAL, G.I.E."
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "SYKESHEALTHPLANSERVICESINC_04_24_1998-EX-10.14-OUTSOURCING AGREEMENT",
+    "kind": "Outsourcing",
+    "family": "sykeshealthplanservicesinc",
+    "review": {
+      "vendor": "Sykes HealthPlan Services, Inc.",
+      "autoRenew": "yes",
+      "months": "12",
+      "conditions_present": true
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "FerroglobePlc_20150624_F-4A_EX-10.20_9154746_EX-10.20_Outsourcing Agreement",
+    "kind": "Outsourcing",
+    "family": "ferroglobeplc",
+    "review": {
+      "vendor": "ESPACIO INFORMATION TECHNOLOGY, SA.",
+      "autoRenew": "yes",
+      "months": "12"
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "CCAINDUSTRIESINC_04_14_2014-EX-10.1-OUTSOURCING AGREEMENT",
+    "kind": "Outsourcing",
+    "family": "ccaindustriesinc",
+    "review": {
+      "vendor": "Emerson HealthCare, LLC",
+      "autoRenew": "yes",
+      "months": "6"
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "BNLFINANCIALCORP_03_30_2007-EX-10.8-OUTSOURCING AGREEMENT",
+    "kind": "Outsourcing",
+    "family": "bnlfinancialcorp",
+    "review": {
+      "vendor": "Virtual Item Processing Systems, Inc.",
+      "autoRenew": "yes",
+      "months": "12"
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "ParatekPharmaceuticalsInc_20170505_10-KA_EX-10.29_10323872_EX-10.29_Outsourcing Agreement",
+    "kind": "Outsourcing",
+    "family": "paratekpharmaceuticalsinc",
+    "review": {
+      "vendor": "CARBOGEN AMCIS AG",
+      "autoRenew": "yes",
+      "conditions_present": true
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "ELANDIAINTERNATIONALINC_04_25_2007-EX-10.21-Outsourcing Agreement",
+    "kind": "Outsourcing",
+    "family": "elandiainternationalinc",
+    "review": {
+      "vendor": "Datec (PNG) LTD",
+      "autoRenew": "no",
+      "months": "60"
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "TRICITYBANKSHARESCORP_05_15_1998-EX-10-OUTSOURCING AGREEMENT",
+    "kind": "Outsourcing",
+    "family": "tricitybanksharescorp",
+    "review": {
+      "vendor": "MARSHALL & ILSLEY CORPORATION",
+      "autoRenew": "no",
+      "months": "12"
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "OASYSMOBILE,INC_07_05_2001-EX-10.17-OUTSOURCING AGREEMENT",
+    "kind": "Outsourcing",
+    "family": "oasysmobile,inc",
+    "review": {
+      "vendor": "E.PIPHANY, INC."
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "DRAGONSYSTEMSINC_01_08_1999-EX-10.17-OUTSOURCING AGREEMENT",
+    "kind": "Outsourcing",
+    "family": "dragonsystemsinc",
+    "review": {
+      "vendor": "MODUS MEDIA INTERNATIONAL"
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "HUBEIMINKANGPHARMACEUTICALLTD_09_19_2006-EX-10.1-OUTSOURCING AGREEMENT",
+    "kind": "Outsourcing",
+    "family": "hubeiminkangpharmaceuticalltd",
+    "review": {
+      "vendor": "Dolphin Industries Limited"
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted.",
+    "extra_references": [
+      {
+        "field": "currency",
+        "value": "USD",
+        "excerpt": "DGT shall pay Dolphin USD10,000, for carrying out the beta testing of the quality of their photo-editing services and testing of the Internet bandwidth for file transmission.",
+        "status_only": false
+      }
+    ]
+  },
+  {
+    "title": "ATMOSENERGYCORP_11_22_2002-EX-10.17-TRANSPORTATION SERVICE AGREEMENT",
+    "kind": "Service",
+    "family": "atmosenergycorp",
+    "review": {
+      "vendor": "Arkansas Western Pipeline Company",
+      "autoRenew": "yes",
+      "months": "1",
+      "conditions_present": true
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "BLACKSTONEGSOLONG-SHORTCREDITINCOMEFUND_05_11_2020-EX-99.(K)(1)-SERVICE AGREEMENT",
+    "kind": "Service",
+    "family": "blackstonegsolong-shortcreditincomefund",
+    "review": {
+      "vendor": "Mellon Investor Services LLC",
+      "autoRenew": "yes",
+      "months": "36"
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "RISEEDUCATIONCAYMANLTD_04_17_2020-EX-4.23-SERVICE AGREEMENT",
+    "kind": "Service",
+    "family": "riseeducationcaymanltd",
+    "review": {
+      "vendor": "Rise (Tianjin) Education Information Consulting Co., Ltd.",
+      "autoRenew": "yes",
+      "months": "60"
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "OPERALTD_04_30_2020-EX-4.14-SERVICE AGREEMENT",
+    "kind": "Service",
+    "family": "operaltd",
+    "review": {
+      "vendor": "Mobimagic Co., Ltd."
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "PAXMEDICA,INC_07_02_2020-EX-10.12-Master Service Agreement",
+    "kind": "Service",
+    "family": "paxmedica,inc",
+    "review": {
+      "vendor": "CRO Consulting (Pty) Limited"
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "DeltathreeInc_19991102_S-1A_EX-10.19_6227850_EX-10.19_Co-Branding Agreement_ Service Agreement",
+    "kind": "Service",
+    "family": "deltathreeinc",
+    "review": {},
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "DataCallTechnologies_20060918_SB-2A_EX-10.9_944510_EX-10.9_Content License Agreement",
+    "kind": "License",
+    "family": "datacalltechnologies",
+    "review": {
+      "vendor": "Data Call Technologies, Inc.",
+      "autoRenew": "yes",
+      "months": "6"
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "GopageCorp_20140221_10-K_EX-10.1_8432966_EX-10.1_Content License Agreement",
+    "kind": "License",
+    "family": "gopagecorp",
+    "review": {
+      "vendor": "PSiTech Corporation",
+      "autoRenew": "yes",
+      "months": "36"
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted.",
+    "extra_references": [
+      {
+        "field": "currency",
+        "value": "USD",
+        "excerpt": "Licensee shall pay Licensor a License Fee in the amount of two hundred thousand dollars (US$200,000) (\"License Fee\").",
+        "status_only": false
+      },
+      {
+        "field": "recipient",
+        "value": null,
+        "excerpt": "If to Licensor: Room 303, 3rd Floor, St. George's Building, 2 Ice House Street, Central, Hong Kong Facsimile: (852) 3526 0355 E-mail:angela@sg-cs.com Attention: Angela Jen",
+        "status_only": true
+      }
+    ]
+  },
+  {
+    "title": "WebmdHealthCorp_20050908_S-1A_EX-10.7_1027007_EX-10.7_Content License Agreement",
+    "kind": "License",
+    "family": "webmdhealthcorp",
+    "review": {
+      "vendor": "WebMD, Inc."
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "ChinaRealEstateInformationCorp_20090929_F-1_EX-10.32_4771615_EX-10.32_Content License Agreement",
+    "kind": "License",
+    "family": "chinarealestateinformationcorp",
+    "review": {
+      "vendor": "Beijing SINA Internet Information Service Co., Ltd."
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  },
+  {
+    "title": "SPHERE3DCORP_06_24_2020-EX-10.12-CONSULTING AGREEMENT",
+    "kind": "Consulting",
+    "family": "sphere3dcorp",
+    "review": {
+      "vendor": "GROUPE PARAMEUS CORP",
+      "autoRenew": "yes",
+      "months": "1",
+      "conditions_present": true
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted.",
+    "extra_references": [
+      {
+        "field": "currency",
+        "value": "USD",
+        "excerpt": "A cash pre-payment of US$150,000 which Consultant acknowledges it received directly from an investor participating in the Company's March 2020 convertible debenture offering and that no additional cash payment is due and payable under this Agreement.",
+        "status_only": false
+      }
+    ]
+  },
+  {
+    "title": "PANDIONTHERAPEUTICSHOLDCOLLC_05_22_2020-EX-10.17-CONSULTING AGREEMENT",
+    "kind": "Consulting",
+    "family": "pandiontherapeuticsholdcollc",
+    "review": {
+      "vendor": "Alan Crane",
+      "autoRenew": "yes",
+      "months": "12"
+    },
+    "review_note": "Supplier roles and renewal excerpts reviewed against the source text by Codex; not an independent human annotation. Unreviewed fields are omitted."
+  }
+]

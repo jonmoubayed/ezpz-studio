@@ -23,6 +23,11 @@ export function expectedValue(
 export function hasExpected(field: Field) {
   return field.hasExpected ?? field.expected !== null;
 }
+export function expectedStatus(values: Record<string, JsonValue> | undefined, key: string): string | undefined {
+  const parent = key.includes(".") ? key.slice(0, key.lastIndexOf(".")) : "";
+  const status = parent && expectedValue(values, `${parent}.status`).expected;
+  return typeof status === "string" && status ? status : undefined;
+}
 export function expectedValues(document: Document): Record<string, JsonValue> {
   return (
     document.groundTruth ??
@@ -41,6 +46,7 @@ export function withExpectedValues(
     fields: document.fields.map((f) => ({
       ...f,
       ...expectedValue(values, f.key),
+      expectedStatus: expectedStatus(values, f.key),
     })),
   };
 }

@@ -1,7 +1,8 @@
+import { workspaceUrl } from "./workspace-context";
 import { readModelSettings, settingsPrompt } from "./model-settings.ts";
 import { confidenceFromResponse } from "./confidence";
 import { harnessError } from "./harness";
-import { expectedValue, extractionCitations } from "./result-model";
+import { expectedValue, expectedStatus, extractionCitations } from "./result-model";
 import type {
   Config,
   Dataset,
@@ -11,7 +12,7 @@ import type {
   Run,
 } from "./domain";
 export async function request(path: string, options: RequestInit = {}) {
-  const response = await fetch(`/v1${path}`, {
+  const response = await fetch(workspaceUrl(`/v1${path}`), {
     ...options,
     headers:
       options.body instanceof FormData
@@ -25,7 +26,7 @@ export async function request(path: string, options: RequestInit = {}) {
     data = JSON.parse(text);
   } catch {
     throw new Error(
-      "The local API did not return JSON. Start the ezpz Python server and check EZPZ_API_URL.",
+      "The local workspace did not respond. Restart ezpz studio, then reconnect.",
     );
   }
   if (!response.ok)
@@ -103,7 +104,7 @@ export function normalizeDocument(d: any): Document {
   return {
     id: d.id,
     name: d.filename || d.name,
-    src: `/v1/documents/${d.id}/source`,
+    src: workspaceUrl(`/v1/documents/${d.id}/source`),
     type: d.content_type || d.mime_type || "application/pdf",
     pages: d.page_count || 1,
     status: "Ready",
@@ -123,6 +124,7 @@ export function extractionFields(e: any, groundTruth?: any): Field[] {
         key,
         value: v?.value ?? null,
         ...expectedValue(groundTruth?.value, key),
+        expectedStatus: expectedStatus(groundTruth?.value, key),
         ...confidenceFromResponse(v),
         citations,
         ...(typeof excerpt === "string" && excerpt.trim()

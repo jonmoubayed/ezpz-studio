@@ -58,7 +58,7 @@ class Settings:
 
     @classmethod
     def from_env(cls, root: Path) -> "Settings":
-        root = Path(root).resolve()
+        root = Path(root).expanduser().resolve()
         _load_dotenv(root)
         project_config = load_project_config(root)
         database_url = os.environ.get("EZPZ_DATABASE_URL") or os.environ.get("DATABASE_URL") or config_value(project_config, "database", "url") or "sqlite:///{}".format(root / ".ezpz" / "ezpz.db")

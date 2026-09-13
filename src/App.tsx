@@ -1,3 +1,5 @@
+import { version as studioVersion } from "../package.json";
+import { WorkspaceSwitcher } from "./workspace-switcher";
 import { isLowConfidence } from "./confidence";
 import { lazy, Suspense, useEffect, useState } from "react";
 import {
@@ -160,21 +162,9 @@ export default function App() {
           <strong>
             ezpz<span>studio</span>
           </strong>
-          <span className="brand-version">beta</span>
+          <span className="brand-version">v{studioVersion}</span>
         </a>
-        <button
-          className="workspace-switch"
-          onClick={() => navigate("Settings")}
-        >
-          <span className="workspace-symbol">
-            <Box size={17} />
-          </span>
-          <span>
-            <strong>My workspace</strong>
-            <small>Local environment</small>
-          </span>
-          <ChevronDown size={14} />
-        </button>
+        <WorkspaceSwitcher />
         <button className="search-trigger" onClick={() => setSearchOpen(true)}>
           <Search size={15} />
           <span>Quick search</span>
@@ -289,7 +279,7 @@ export default function App() {
                 <>
                   <h2>Your local backend is unavailable</h2>
                   <p>
-                    Start the workspace with <code>npm start</code>, then
+                    Start the workspace with <code>ezpz studio</code>, then
                     reconnect to load your saved documents, processors, and
                     evaluations.
                   </p>

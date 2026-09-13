@@ -199,15 +199,20 @@ assert.equal(
   store!.reviews.find((r) => r.field === "total")?.note,
   "Verified against source",
 );
-await act(async () => {
-  store!.demo();
-});
+// Switching to demo opens a new document to reset workspace-scoped state.
+// JSDOM cannot navigate; the browser workspace suite covers the actual control.
+await act(async () => root.unmount());
+history.replaceState(null, "", `${base}/?workspace=ws_local&demo=1#Overview`);
+root = createRoot(document.getElementById("root")!);
+await mount();
 assert.equal(store!.mode, "demo");
 assert.notEqual(store!.config.prompt, "Unsaved local processor draft");
 assert.equal(new URLSearchParams(location.search).get("demo"), "1");
-await act(async () => {
-  await store!.connect();
-});
+await act(async () => root.unmount());
+history.replaceState(null, "", `${base}/?workspace=ws_local#Overview`);
+root = createRoot(document.getElementById("root")!);
+await mount();
+await settle(() => store!.connection === "ready" && !store!.busy, "return from demo");
 assert.equal(store!.config.prompt, "Unsaved local processor draft");
 assert.equal(store!.mode, "live");
 assert.equal(new URLSearchParams(location.search).has("demo"), false);
@@ -302,7 +307,7 @@ const realFetch = globalThis.fetch;
 globalThis.fetch = ((input: any, init: any) => {
   if (
     typeof input === "string" &&
-    /\/datasets\/[^/]+\/documents$/.test(input) &&
+    /\/datasets\/[^/]+\/documents$/.test(new URL(input, base).pathname) &&
     init?.method === "POST"
   )
     return Promise.resolve(
@@ -350,7 +355,7 @@ assert.deepEqual(retried.documents[0].ground_truth, expected);
 globalThis.fetch = ((input: any, init: any) => {
   if (
     typeof input === "string" &&
-    input.endsWith(`/datasets/${savedDataset.id}/manifest`)
+    new URL(input, base).pathname.endsWith(`/datasets/${savedDataset.id}/manifest`)
   )
     return Promise.resolve(
       new Response(JSON.stringify({ manifest: { documents: [] } }), {

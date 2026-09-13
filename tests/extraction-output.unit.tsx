@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { extractionValues, fieldTree } from '../src/extraction-output';
+import { answerFields, extractionValues, fieldTree } from '../src/extraction-output';
 
 const fields = [
   { key: 'vendor.value', value: 'Example Corp.' },
@@ -57,9 +57,16 @@ test('renders accessible object groups while retaining each full field path', ()
   const doc = new JSDOM(markup).window.document;
   assert.equal(doc.querySelectorAll('details[open]').length, 2);
   assert.equal(doc.querySelector('summary')?.getAttribute('aria-label'), 'vendor object');
-  assert.equal(doc.querySelectorAll('button').length, fields.length);
+  assert.equal(doc.querySelectorAll('button').length, 4, 'Evidence leaves accompany answers rather than rendering as unannotated questions');
   assert.equal(doc.querySelector('button')?.textContent, 'value');
   assert.equal(doc.querySelector('button')?.getAttribute('aria-label'), 'Inspect source for vendor.value');
+});
+test('keeps evidence in raw JSON and retains explicitly annotated or ordinary location fields', () => {
+  assert.deepEqual(answerFields(fields).map(f => f.key), ['vendor.value', 'vendor.status', 'endDate.value', 'endDate.status']);
+  assert.equal(Object.keys(extractionValues(fields).vendor as object).length, 4);
+  const annotated = fields.map(f => ({ ...f, hasExpected: f.key === 'vendor.excerpt' }));
+  assert.ok(answerFields(annotated).some(f => f.key === 'vendor.excerpt'));
+  assert.deepEqual(answerFields([{key: 'shipping.location'}]), [{key: 'shipping.location'}]);
 });
 test('fallback expected JSON uses the same nested shape and excludes unannotated leaves', () => {
   const doc = { fields: [

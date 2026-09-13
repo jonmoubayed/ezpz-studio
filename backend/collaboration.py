@@ -26,6 +26,9 @@ def initialize_collaboration(connection):
         id TEXT PRIMARY KEY, request_key TEXT NOT NULL UNIQUE, payload_json TEXT NOT NULL,
         status TEXT NOT NULL, result_json TEXT, error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
     )""")
+    job_columns = {r["name"] for r in connection.execute("PRAGMA table_info(agent_jobs)")}
+    if "workspace_id" not in job_columns:
+        connection.execute("ALTER TABLE agent_jobs ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'ws_local'")
     # Triggers include changes made through the CLI and other database connections.
     tables = [r["name"] for r in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")]
     for table in tables:
@@ -95,7 +98,7 @@ class AgentJobs:
         self.pool.shutdown(wait=True)
 
     def get(self, job_id):
-        row = self.runtime.database._one("SELECT * FROM agent_jobs WHERE id = ?", (job_id,))
+        row = self.runtime.database._one("SELECT * FROM agent_jobs WHERE id = ? AND workspace_id = ?", (job_id, self.runtime.database._workspace_id()))
         if not row:
             raise ValueError("Agent job not found")
         job = dict(row)
@@ -121,6 +124,7 @@ class AgentJobs:
         if not isinstance(key, str) or not key.strip() or len(key) > 200:
             raise ValueError("request_key is required (reuse it only when retrying the same request)")
         db = self.runtime.database
+        key = key if db._workspace_id() == db.workspace_id else db._workspace_id() + ":" + key
         body = json.dumps(payload, sort_keys=True, allow_nan=False)
         with self.lock:
             existing = db._one("SELECT id, payload_json FROM agent_jobs WHERE request_key = ?", (key,))
@@ -141,7 +145,7 @@ class AgentJobs:
                 raise ValueError("Agent job queue is full; wait for existing jobs to finish")
             job_id = new_id("job")
             now = utc_now()
-            db._execute("INSERT INTO agent_jobs (id, request_key, payload_json, status, created_at, updated_at) VALUES (?, ?, ?, 'queued', ?, ?)", (job_id, key, body, now, now))
+            db._execute("INSERT INTO agent_jobs (id, request_key, payload_json, status, created_at, updated_at, workspace_id) VALUES (?, ?, ?, 'queued', ?, ?, ?)", (job_id, key, body, now, now, db._workspace_id()))
             fingerprint = benchmark_fingerprint(db, payload["dataset_id"])
             self.pool.submit(copy_context().run, self._execute, job_id, payload, version, fingerprint)
             return self.get(job_id)

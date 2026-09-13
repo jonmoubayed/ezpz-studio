@@ -4,10 +4,22 @@ on:
   push:
     paths:
       - 'demo-site/**'
+      - 'src/**'
+      - 'public/**'
+      - 'licenses/**'
+      - 'EXTEND-LICENSE.md'
+      - 'package.json'
+      - 'pyproject.toml'
       - '.github/workflows/demo-site.yml'
   pull_request:
     paths:
       - 'demo-site/**'
+      - 'src/**'
+      - 'public/**'
+      - 'licenses/**'
+      - 'EXTEND-LICENSE.md'
+      - 'package.json'
+      - 'pyproject.toml'
       - '.github/workflows/demo-site.yml'
 
 permissions:

@@ -1,4 +1,5 @@
 import { FieldValues } from "./expected-values";
+import { answerFields } from "./extraction-output";
 import { FieldSelect } from "./components/field-select";
 import { useEffect, useState } from "react";
 import {
@@ -1041,7 +1042,7 @@ function EvaluationResults({ run }: { run: Run }) {
   const document =
     visibleDocs.find((d) => d.id === documentId) || visibleDocs[0];
   const fields =
-    document?.fields.filter(
+    answerFields(document?.fields ?? []).filter(
       (f) =>
         (filter !== "failures" || failed(f)) &&
         (!fieldFilter || f.key === fieldFilter),
@@ -1256,7 +1257,7 @@ function EvaluationResults({ run }: { run: Run }) {
                       <small>
                         {d.fields.filter(failed).length
                           ? `${d.fields.filter(failed).length} incorrect fields`
-                          : d.fields.some((f) => f.status === "unscored")
+                          : answerFields(d.fields).some((f) => f.status === "unscored")
                             ? "Unscored fields"
                             : "All fields correct"}
                       </small>

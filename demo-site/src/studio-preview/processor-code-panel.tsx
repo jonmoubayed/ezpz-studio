@@ -30,7 +30,7 @@ export function ProcessorCodePanel({ config, valid }: { config: Config; valid: b
   return (
     <div className="processor-code-panel">
       <div className="processor-code-heading">
-        <div><h2>Use this processor in code</h2><p>Python · {config.parser} → {config.model}</p></div>
+        <div><h2>Use this processor in code</h2><p>Python · {config.harness?.name === "workflow" ? "Saved extraction flow" : `${config.parser} → ${config.model}`}</p></div>
         <Button onClick={copy} disabled={!snippet.code}>
           {status === "Copied to clipboard" ? <Check size={14} /> : <Copy size={14} />}
           {status === "Copied to clipboard" ? "Copied" : "Copy code"}

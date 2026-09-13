@@ -30,6 +30,12 @@ def reset_request_context(tokens) -> None:
 SCHEMA = """
 PRAGMA foreign_keys = ON;
 
+CREATE TABLE IF NOT EXISTS workspaces (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS documents (
     id TEXT PRIMARY KEY,
     workspace_id TEXT NOT NULL,
@@ -364,6 +370,7 @@ class Database:
                 connection.execute("CREATE INDEX IF NOT EXISTS idx_runs_eval_experiment ON runs(eval_experiment_id, created_at DESC)")
                 connection.execute("CREATE INDEX IF NOT EXISTS idx_eval_groups_dataset ON eval_groups(dataset_id)")
                 connection.execute("CREATE INDEX IF NOT EXISTS idx_eval_experiments_processor_version ON eval_experiments(processor_version_id)")
+                connection.execute("INSERT OR IGNORE INTO workspaces (id, name, created_at) VALUES (?, ?, ?)", (self.workspace_id, "My workspace", utc_now()))
                 initialize_collaboration(connection)
                 self._backfill_eval_structure(connection)
                 connection.commit()
@@ -499,6 +506,29 @@ class Database:
             finally:
                 self._unit.connection = None
                 connection.close()
+
+    def list_workspaces(self) -> List[Dict[str, Any]]:
+        return [dict(row) for row in self._all("SELECT * FROM workspaces ORDER BY created_at, id")]
+
+    def get_workspace(self, workspace_id: str) -> Optional[Dict[str, Any]]:
+        row = self._one("SELECT * FROM workspaces WHERE id = ?", (workspace_id,))
+        return dict(row) if row else None
+
+    def save_workspace(self, name: str, workspace_id: Optional[str] = None) -> Dict[str, Any]:
+        if not isinstance(name, str) or not name.strip() or len(name.strip()) > 80:
+            raise ValueError("Enter a workspace name between 1 and 80 characters.")
+        name = name.strip()
+        if workspace_id and not self.get_workspace(workspace_id):
+            raise ValueError("Workspace not found")
+        identifier = workspace_id or new_id("ws")
+        try:
+            if workspace_id:
+                self._execute("UPDATE workspaces SET name = ? WHERE id = ?", (name, identifier))
+            else:
+                self._execute("INSERT INTO workspaces (id, name, created_at) VALUES (?, ?, ?)", (identifier, name, utc_now()))
+        except sqlite3.IntegrityError:
+            raise ValueError("A workspace with this name already exists.") from None
+        return self.get_workspace(identifier)
 
     def get_document(self, document_id: str) -> Optional[Dict[str, Any]]:
         row = self._one("SELECT * FROM documents WHERE id = ? AND workspace_id = ? AND project_id = ?", (document_id, self._workspace_id(), self._project_id()))
@@ -786,7 +816,7 @@ class Database:
             return documents
 
     def update_run_progress(self, run_id: str, metrics: Dict[str, Any]) -> None:
-        self._execute("UPDATE runs SET metrics_json = ? WHERE id = ? AND status IN ('running', 'pausing', 'cancelling')", (_dump(metrics), run_id))
+        self._execute("UPDATE runs SET metrics_json = ? WHERE id = ? AND status IN ('running', 'pausing', 'cancelling') AND workspace_id = ? AND project_id = ?", (_dump(metrics), run_id, self._workspace_id(), self._project_id()))
 
     def cancel_run(self, run_id: str) -> Optional[Dict[str, Any]]:
         self._execute("UPDATE runs SET status = 'cancelling' WHERE id = ? AND status = 'running' AND workspace_id = ? AND project_id = ?", (run_id, self._workspace_id(), self._project_id()))
@@ -1203,6 +1233,10 @@ class Database:
             params,
         )
         return [self._review_decision(row) for row in rows]
+
+    def clear_extraction_cache(self) -> None:
+        """Retry provider work after credential edits; keep saved runs intact."""
+        self._execute("DELETE FROM extraction_cache WHERE workspace_id = ? AND project_id = ?", (self._workspace_id(), self._project_id()))
 
     def get_extraction_cache(self, cache_key: str) -> Optional[Dict[str, Any]]:
         row = self._one("SELECT * FROM extraction_cache WHERE cache_key = ? AND workspace_id = ? AND project_id = ?", (cache_key, self._workspace_id(), self._project_id()))

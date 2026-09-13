@@ -79,6 +79,24 @@ console.log(
   "PASS: normalized and absolute coordinates, multi-page evidence, degenerate boxes, absent vs explicit null/zero/false ground truth, nested paths, and exact typed comparisons.",
 );
 
+const { FieldValues, ExpectedFieldValue } = await import("../src/expected-values");
+const absentField = { ...field, key: "amount.value", value: "", expected: null, hasExpected: true };
+const { renderToStaticMarkup: renderFieldMarkup } = await import("react-dom/server");
+const { createElement: fieldElement } = await import("react");
+const absentMarkup = renderFieldMarkup(fieldElement(FieldValues, {field: absentField}));
+assert.match(absentMarkup, /Not found in source/);
+assert.match(absentMarkup, /Matches expected/);
+assert.doesNotMatch(absentMarkup, /Not annotated|Different from expected/);
+const conflictMarkup = renderFieldMarkup(fieldElement(ExpectedFieldValue, {field: {...absentField, hasExpected: false, expectedStatus: "conflicting"}}));
+assert.match(conflictMarkup, /Conflicting source clauses/);
+assert.doesNotMatch(conflictMarkup, /Not annotated/);
+const missingMarkup = renderFieldMarkup(fieldElement(ExpectedFieldValue, {field: {...absentField, hasExpected: false}}));
+assert.match(missingMarkup, /Not annotated/, "Truly missing reference answers remain distinguishable");
+const evidenceMarkup = renderFieldMarkup(fieldElement(FieldValues, {field: {...field, key: "months.value", sourceExcerpt: "A twelve month term", sourceLocation: "PDF page 2"}}));
+assert.match(evidenceMarkup, /Source evidence/);
+assert.match(evidenceMarkup, /PDF page 2/);
+assert.match(evidenceMarkup, /A twelve month term/);
+
 const modelBoxes = extractionCitations({parser_ir: {pages: []}}, [
   {page: 2, bbox: [.1, .2, .4, .3], metadata: {bbox_source: "model"}},
 ]);

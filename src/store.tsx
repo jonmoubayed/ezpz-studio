@@ -1,3 +1,4 @@
+import { workspaceStorage, workspaceId, defaultWorkspaceId, openWorkspace } from "./workspace-context";
 import {
   withExpectedValues,
   expectedValues,
@@ -51,6 +52,11 @@ type Review = {
   runId: string;
   at: string;
 };
+const demoSampleDocuments = workspaceId === defaultWorkspaceId ? sampleDocuments : [];
+const demoSampleDatasets = workspaceId === defaultWorkspaceId ? sampleDatasets : [];
+const demoSampleRuns = workspaceId === defaultWorkspaceId ? sampleRuns : [];
+const demoSampleGroups = workspaceId === defaultWorkspaceId ? sampleGroups : [];
+const demoSampleProcessors = workspaceId === defaultWorkspaceId ? sampleProcessors : [];
 function useStore() {
   const initialDemo = new URLSearchParams(location.search).get("demo") === "1";
   const [mode, setMode] = useState<"demo" | "live">(
@@ -91,22 +97,28 @@ function useStore() {
     }
   });
   const [documents, setDocuments] = useState<Document[]>(
-    initialDemo ? sampleDocuments : [],
+    initialDemo ? readStored("ezpz-redesign-documents", demoSampleDocuments) : [],
   );
   const [datasets, setDatasets] = useState<Dataset[]>(
-    initialDemo ? sampleDatasets : [],
+    initialDemo ? readStored("ezpz-redesign-datasets", demoSampleDatasets) : [],
   );
+  useEffect(() => {
+    if (mode !== "demo") return;
+    // Object URLs are session-only; persist sample documents and editable demo data.
+    workspaceStorage.setItem("ezpz-redesign-documents", JSON.stringify(documents.filter(d => !d.src?.startsWith("blob:"))));
+    workspaceStorage.setItem("ezpz-redesign-datasets", JSON.stringify(datasets));
+  }, [mode, documents, datasets]);
   const [runs, setRuns] = useState<Run[]>(
     (initialDemo
-      ? readStored<Run[]>("ezpz-redesign-runs", sampleRuns)
+      ? readStored<Run[]>("ezpz-redesign-runs", demoSampleRuns)
       : []
     ).map((r) => ({
-      ...sampleRuns.find((sample) => sample.id === r.id),
+      ...demoSampleRuns.find((sample) => sample.id === r.id),
       ...r,
     })),
   );
   const [evalGroups, setEvalGroups] = useState<EvalGroup[]>(
-    initialDemo ? readStored("ezpz-redesign-groups", sampleGroups) : [],
+    initialDemo ? readStored("ezpz-redesign-groups", demoSampleGroups) : [],
   );
   const [selectedId, setSelectedId] = useState("sample-0");
   const [config, setConfig] = useState<Config>(
@@ -121,7 +133,7 @@ function useStore() {
   const [busy, setBusy] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [processors, setProcessors] = useState<Processor[]>(
-    initialDemo ? readStored("ezpz-redesign-processors", sampleProcessors) : [],
+    initialDemo ? readStored("ezpz-redesign-processors", demoSampleProcessors) : [],
   );
   const [activeProcessorId, setActiveProcessorId] = useState<string>(
     initialDemo ? readStored("ezpz-redesign-active-processor", "") : "",
@@ -132,18 +144,21 @@ function useStore() {
     null,
   );
   const activeProcessor = processors.find((p) => p.id === activeProcessorId);
-  function chooseProcessor(p: Processor, config = p.config) {
+  function chooseProcessor(p: Processor, selectedConfig?: Config) {
+    const config = selectedConfig ?? (mode === "live"
+      ? readStored(`ezpz-live-config:${p.id}`, p.config)
+      : p.config);
     setActiveProcessorId(p.id);
     setConfigBaseVersion(p.version);
-    if (mode === "live") localStorage.setItem(`ezpz-live-config-base:${p.id}`, JSON.stringify(p.version));
-    localStorage.setItem(
+    if (mode === "live") workspaceStorage.setItem(`ezpz-live-config-base:${p.id}`, JSON.stringify(p.version));
+    workspaceStorage.setItem(
       mode === "demo"
         ? "ezpz-redesign-active-processor"
         : "ezpz-live-active-processor",
       JSON.stringify(p.id),
     );
     setConfig(structuredClone(config));
-    localStorage.setItem(
+    workspaceStorage.setItem(
       mode === "demo" ? "ezpz-redesign-config" : `ezpz-live-config:${p.id}`,
       JSON.stringify(config),
     );
@@ -152,7 +167,7 @@ function useStore() {
   function persistProcessors(next: Processor[]) {
     setProcessors(next);
     if (mode === "demo")
-      localStorage.setItem("ezpz-redesign-processors", JSON.stringify(next));
+      workspaceStorage.setItem("ezpz-redesign-processors", JSON.stringify(next));
   }
   async function createProcessor(name: string, description: string, c: Config) {
     setBusy(true);
@@ -238,7 +253,7 @@ function useStore() {
         };
       }
       setConfigBaseVersion(next.version);
-      if (mode === "live") localStorage.setItem(`ezpz-live-config-base:${next.id}`, JSON.stringify(next.version));
+      if (mode === "live") workspaceStorage.setItem(`ezpz-live-config-base:${next.id}`, JSON.stringify(next.version));
       persistProcessors(processors.map((p) => (p.id === next.id ? next : p)));
       setMessage(`Saved ${next.name} · version ${next.version}.`);
       return true;
@@ -288,7 +303,7 @@ function useStore() {
   }
   function updateConfig(c: Config) {
     setConfig(c);
-    localStorage.setItem(
+    workspaceStorage.setItem(
       mode === "demo"
         ? "ezpz-redesign-config"
         : `ezpz-live-config:${activeProcessorId || "scratch"}`,
@@ -301,7 +316,7 @@ function useStore() {
   function selectDocument(d: Document) {
     setSelectedId(d.id);
     if (mode === "live")
-      localStorage.setItem("ezpz-live-document", JSON.stringify(d.id));
+      workspaceStorage.setItem("ezpz-live-document", JSON.stringify(d.id));
   }
   useEffect(() => {
     if (mode !== "live" || connection !== "ready" || !selectedId) return;
@@ -355,7 +370,7 @@ function useStore() {
             at: r.updated_at,
           })),
         );
-        localStorage.setItem("ezpz-live-review-run", JSON.stringify(id));
+        workspaceStorage.setItem("ezpz-live-review-run", JSON.stringify(id));
       } else {
         const run = runs.find((r) => r.id === id);
         if (run) setReviewDocuments(demoEvaluationDocuments(run));
@@ -370,6 +385,7 @@ function useStore() {
     }
   }
   async function connect() {
+    if (mode === "demo") { openWorkspace(defaultWorkspaceId, false); return; }
     const attempt = ++connectionAttempt.current;
     setBusy(true);
     setMode("live");
@@ -435,6 +451,7 @@ function useStore() {
     };
   }, []);
   function demo() {
+    if (mode === "live") { openWorkspace(defaultWorkspaceId, true); return; }
     ++connectionAttempt.current;
     ++reviewAttempt.current;
     setReviewLoading(false);
@@ -448,14 +465,14 @@ function useStore() {
     url.searchParams.set("demo", "1");
     history.replaceState(null, "", url);
     setMode("demo");
-    setProcessors(readStored("ezpz-redesign-processors", sampleProcessors));
+    setProcessors(readStored("ezpz-redesign-processors", demoSampleProcessors));
     setActiveProcessorId(readStored("ezpz-redesign-active-processor", ""));
-    setDocuments(sampleDocuments);
-    setDatasets(sampleDatasets);
-    setEvalGroups(readStored("ezpz-redesign-groups", sampleGroups));
+    setDocuments(demoSampleDocuments);
+    setDatasets(demoSampleDatasets);
+    setEvalGroups(readStored("ezpz-redesign-groups", demoSampleGroups));
     setRuns(
-      readStored<Run[]>("ezpz-redesign-runs", sampleRuns).map((r) => ({
-        ...sampleRuns.find((sample) => sample.id === r.id),
+      readStored<Run[]>("ezpz-redesign-runs", demoSampleRuns).map((r) => ({
+        ...demoSampleRuns.find((sample) => sample.id === r.id),
         ...r,
       })),
     );
@@ -466,12 +483,14 @@ function useStore() {
     );
   }
   function resetDemo() {
-    localStorage.removeItem("ezpz-redesign-groups");
-    localStorage.removeItem("ezpz-redesign-processors");
-    localStorage.removeItem("ezpz-redesign-active-processor");
-    localStorage.removeItem("ezpz-redesign-runs");
-    localStorage.removeItem("ezpz-redesign-reviews");
-    localStorage.removeItem("ezpz-redesign-config");
+    workspaceStorage.removeItem("ezpz-redesign-documents");
+    workspaceStorage.removeItem("ezpz-redesign-datasets");
+    workspaceStorage.removeItem("ezpz-redesign-groups");
+    workspaceStorage.removeItem("ezpz-redesign-processors");
+    workspaceStorage.removeItem("ezpz-redesign-active-processor");
+    workspaceStorage.removeItem("ezpz-redesign-runs");
+    workspaceStorage.removeItem("ezpz-redesign-reviews");
+    workspaceStorage.removeItem("ezpz-redesign-config");
     demo();
     setMessage("Demo reset to the original sample documents and experiments.");
   }
@@ -591,7 +610,7 @@ function useStore() {
         const extracted = withExpectedValues(
           {
             ...selected,
-            fields: sampleDocuments.find((d) => d.id === selected.id)!.fields,
+            fields: demoSampleDocuments.find((d) => d.id === selected.id)!.fields,
           },
           expectedValues(selected),
         );
@@ -658,7 +677,7 @@ function useStore() {
       };
       const next = [...evalGroups, group];
       setEvalGroups(next);
-      localStorage.setItem("ezpz-redesign-groups", JSON.stringify(next));
+      workspaceStorage.setItem("ezpz-redesign-groups", JSON.stringify(next));
       return group;
     }
     const { eval_group } = await api.request("/eval-groups", {
@@ -691,13 +710,13 @@ function useStore() {
           };
           const nextGroups = [...evalGroups, targetGroup];
           setEvalGroups(nextGroups);
-          localStorage.setItem(
+          workspaceStorage.setItem(
             "ezpz-redesign-groups",
             JSON.stringify(nextGroups),
           );
         }
         const r: Run = {
-          ...sampleRuns[0],
+          ...demoSampleRuns[0],
           id: crypto.randomUUID(),
           name,
           groupId: targetGroup.id,
@@ -715,7 +734,7 @@ function useStore() {
         };
         const next = [r, ...runs];
         setRuns(next);
-        localStorage.setItem("ezpz-redesign-runs", JSON.stringify(next));
+        workspaceStorage.setItem("ezpz-redesign-runs", JSON.stringify(next));
         setMessage(
           "Demo run added using a fixed illustrative score. Connect the API to measure real changes.",
         );
@@ -896,7 +915,7 @@ function useStore() {
       ];
       setReviews(next);
       if (mode === "demo")
-        localStorage.setItem("ezpz-redesign-reviews", JSON.stringify(next));
+        workspaceStorage.setItem("ezpz-redesign-reviews", JSON.stringify(next));
       setMessage("Review saved. The original extraction remains preserved.");
       return true;
     } catch (e) {

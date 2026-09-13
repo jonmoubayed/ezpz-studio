@@ -73,7 +73,7 @@ async function stop(child) {
 }
 try {
   await waitFor(`http://127.0.0.1:${port}/v1/ready`);
-  if (process.argv.includes("--browser") || process.argv.includes("--harness") || process.argv.includes("--mcp-browser")) {
+  if (process.argv.includes("--browser") || process.argv.includes("--hill") || process.argv.includes("--harness") || process.argv.includes("--mcp-browser")) {
     const browserPort = await freePort();
     const browserUrl = `http://127.0.0.1:${browserPort}`;
     preview = spawn(
@@ -94,7 +94,7 @@ try {
     );
     preview.stderr.on("data", (d) => (serverErrors += d));
     await waitFor(`${browserUrl}/v1/ready`);
-    await run(process.argv.includes("--mcp-browser") ? "tests/mcp.browser.ts" : process.argv.includes("--harness") ? "tests/harness.browser.ts" : "tests/browser.integration.ts", {
+    await run(process.argv.includes("--mcp-browser") ? "tests/mcp.browser.ts" : process.argv.includes("--harness") ? "tests/harness.browser.ts" : process.argv.includes("--hill") ? "tests/hill-loop.browser.ts" : "tests/browser.integration.ts", {
       STUDIO_BROWSER_URL: browserUrl,
       STUDIO_TEST_DISPOSABLE: "1",
     });

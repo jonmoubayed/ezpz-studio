@@ -110,7 +110,7 @@ class Artifacts:
         return json.loads((self.directory / (key + ".json")).read_text())
 
 
-def execute_harness(document, data, version, model_factory, directory, execution_id, check=None):
+def execute_harness(document, data, version, model_factory, directory, execution_id, check=None, credential_resolver=None):
     """One immutable document execution. Reinvoking resumes the same task sequence."""
     spec = version.get("harness") or {"name": "direct"}
     validate_spec(spec, version.get("schema", {}))
@@ -158,7 +158,7 @@ def execute_harness(document, data, version, model_factory, directory, execution
             context = artifacts.read(request["context"])
             kind = request["kind"]
             if kind == "parse":
-                result = {"ir": parse_document(document, data, request["config"]).to_dict()}
+                result = {"ir": parse_document(document, data, request["config"], credential_resolver).to_dict()}
             elif kind == "extract":
                 adapter = model_factory(request["config"])
                 ir = restore_ir(context["ir"])
@@ -178,7 +178,7 @@ def execute_harness(document, data, version, model_factory, directory, execution
                         put(result["output"], path, wrapped)
             elif kind == "plugin":
                 ir = restore_ir(context["ir"])
-                result = asdict(run_harness(ir, request["schema"], request["prompt"], spec, model_factory(version["model"]), model_factory, version["model"], source_document=source, source_bytes=data))
+                result = asdict(run_harness(ir, request["schema"], request["prompt"], spec, model_factory(version["model"]), model_factory, version["model"], source_document=source, source_bytes=data, credential_resolver=credential_resolver))
             else:
                 raise ValueError("Unknown operation")
             elapsed = int((time.perf_counter() - started) * 1000)

@@ -328,7 +328,7 @@ class GeminiModel:
             raise RuntimeError("{} model request failed or credentials are missing. Check the selected provider and backend credentials; no fallback model was used.".format(self.provider))
 
 
-def create_model_adapter(config: Optional[Dict[str, Any]] = None):
+def create_model_adapter(config: Optional[Dict[str, Any]] = None, credential_resolver=None):
     """Build the LLM adapter selected by a processor version.
 
     Provider selection is explicit for new configs.  Legacy versions that only
@@ -338,14 +338,15 @@ def create_model_adapter(config: Optional[Dict[str, Any]] = None):
     provider = normalize_model_provider(normalized.get("provider"), normalized.get("name", ""))
     model_name = str(normalized.get("name") or "")
     credential_ref = str(normalized.get("credential_ref") or "").strip()
+    lookup = credential_resolver or os.environ.get
 
     def credential(defaults: List[str]) -> Optional[str]:
         if credential_ref:
-            return os.environ.get(credential_ref)
+            return lookup(credential_ref)
         direct = normalized.get("api_key")
         if isinstance(direct, str) and direct:
             return direct
-        return next((os.environ.get(key) for key in defaults if os.environ.get(key)), None)
+        return next((lookup(key) for key in defaults if lookup(key)), None)
 
     if provider == "local":
         return DeterministicInvoiceModel()

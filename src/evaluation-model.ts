@@ -51,6 +51,8 @@ export function evaluationDocuments(
     const fields = [...keys].map((key) => {
       const prediction = predictions.find((f) => f.key === key);
       const score = ev?.fields?.[key];
+      const parent = key.includes(".") ? key.slice(0, key.lastIndexOf(".")) : "";
+      const referenceStatus = parent && ev?.fields?.[`${parent}.status`]?.expected;
       return {
         ...(prediction ?? {
           key,
@@ -68,6 +70,7 @@ export function evaluationDocuments(
           Object.hasOwn(score, "expected") &&
           score.status !== "unscored",
         status: score?.status || "unscored",
+        expectedStatus: typeof referenceStatus === "string" ? referenceStatus : undefined,
       } as Field;
     });
     return { ...doc, fields, runId: raw.id, warnings: ex?.warnings ?? [], harnessSteps: ex?.result?.provenance?.harness_steps };

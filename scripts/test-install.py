@@ -103,6 +103,12 @@ def main():
             process, base = start(log)
             try:
                 assert request(base, "/v1/ready")["ok"]
+                assert {"harnesses", "run_steps", "resumable_evaluations"} <= set(request(base, "/v1/workspace/revision")["capabilities"])
+                assert request(base, "/v1/workspaces")["workspaces"]
+                assert request(base, "/v1/settings/credentials")["providers"]
+                assert request(base, "/v1/hill-climbs")["hill_climbs"] == []
+                assert request(base, "/v1/harnesses")
+                subprocess.run([str(python), "-c", "from backend.notice_harness import run; assert callable(run)"], cwd=root, env=runtime_env, check=True)
                 assert request(base, "/v1/documents")["documents"] == []
                 with opener.open(base) as response:
                     html = response.read().decode()

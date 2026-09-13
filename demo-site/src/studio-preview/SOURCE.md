@@ -1,5 +1,5 @@
 # Studio preview source
 
-Snapshot of the green ezpz-studio-redesign frontend. Re-sync with `node scripts/sync-studio-preview.mjs [source-directory]`.
+Generated from `../src`, the frontend shipped in Studio 0.1.4. Every `pnpm build` and `pnpm dev` refreshes this snapshot. Edit the packaged frontend for interface changes; edit the hardening script for public-demo adaptations.
 
-Import aliases, public asset paths, storage keys, API transport, and live-mode controls are adapted. The snapshot is locked to browser-only demo mode. The sync script reapplies this boundary and fails if the expected source structure changes. The page is rendered in its own iframe so the actual redesign components, fonts, and styles stay isolated from the landing page and legacy app. Third-party notices are retained in `licenses/studio-preview`.
+Import aliases, asset paths, storage keys, API transport, and live-mode controls are adapted. The public snapshot is always a static demo. Its source fingerprint is published at `/studio/build.json`. Third-party notices are retained in `licenses/studio-preview`.

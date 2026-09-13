@@ -1,0 +1,33 @@
+.hypotheses .hypothesis-card {
+  margin: 0 14px 12px;
+  padding: 16px;
+  border: 1px solid #e1e7d9;
+  border-radius: 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.hypothesis-card.selected { background: #f4f8ee; border-color: #cbdcba; }
+.hypothesis-card-heading { display: flex; align-items: center; gap: 12px; }
+.hypothesis-card-heading h3 { font-size: 13px; margin: 0; }
+.hypotheses .hypothesis-card p, .hypotheses .hypothesis-state { font-size: 12px; color: #627057; line-height: 1.65; }
+.hypotheses .hypothesis-card .hypothesis-observation { color: #2b3831; margin-top: 14px; }
+.hypotheses .hypothesis-card small { font-size: 10px; margin-top: 3px; color: #627057; }
+.hypothesis-change { margin-top: 12px; font-size: 12px; }
+.hypothesis-change summary { cursor: pointer; color: #526744; }
+.hypothesis-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.hypotheses .hypothesis-state { margin: 0; padding: 0 23px 20px; }
+.hypothesis-example-list { display: flex; gap: 8px; overflow: auto; padding-bottom: 12px; }
+.hypothesis-example-list button { text-align: left; padding: 10px; border: 1px solid #e1e7d9; border-radius: 6px; flex-shrink: 0; max-width: 260px; overflow-wrap: anywhere; }
+.hypothesis-example-list button[aria-pressed="true"] { background: #f4f8ee; border-color: #9bab8b; }
+.hypothesis-example-list small { display: block; color: #627057; }
+.hypothesis-values { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+.hypothesis-values > div { min-width: 0; }
+.hypothesis-values strong { font-size: 12px; }
+.hypothesis-values pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 180px; overflow: auto; font-size: 12px; padding: 12px; background: #f7f8f4; border-radius: 6px; }
+.hypothesis-source { height: 420px; overflow: auto; border: 1px solid #e1e7d9; border-radius: 8px; }
+.hypothesis-source > * { height: 100%; }
+@media (max-width: 600px) {
+  .hypothesis-values { grid-template-columns: 1fr; }
+  .hypothesis-actions > button { width: 100%; justify-content: center; }
+  .hypothesis-source { height: 300px; }
+}

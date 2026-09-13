@@ -1,3 +1,8 @@
+import { workspaceUrl } from "./workspace-context";
+import { readModelSettings, settingsPrompt } from "./model-settings.ts";
+import { confidenceFromResponse } from "./confidence";
+import { harnessError } from "./harness";
+import { expectedValue, extractionCitations } from "./result-model";
 import type {
   Config,
   Dataset,
@@ -7,13 +12,6 @@ import type {
   Run,
 } from "./domain";
 // Deliberately no network transport in the public studio snapshot.
-// Deliberately no network transport in the public studio snapshot.
-// Deliberately no network transport in the public studio snapshot.
-// Deliberately no network transport in the public studio snapshot.
-// Deliberately no network transport in the public studio snapshot.
-// Deliberately no network transport in the public studio snapshot.
-// Deliberately no network transport in the public studio snapshot.
-// Deliberately no network transport in the public studio snapshot.
 export async function request(_path: string, _options: RequestInit = {}): Promise<any> {
   throw new Error("This is a static demo. API and provider calls are disabled.");
 }
@@ -22,7 +20,7 @@ const post = (path: string, body: unknown) =>
   request(path, { method: "POST", body: JSON.stringify(body) });
 export const configPayload = (c: Config) => ({
   schema: JSON.parse(c.schema),
-  prompt: { extraction: c.prompt },
+  prompt: settingsPrompt(c),
   parser: { name: c.parser, version: "1" },
   model: {
     provider: c.provider,
@@ -31,22 +29,30 @@ export const configPayload = (c: Config) => ({
       ? { base_url: c.baseUrl }
       : {}),
   },
-  harness: { name: "direct", version: "1" },
+  harness: (() => { const error = harnessError(c.harness); if (error) throw new Error(error); return c.harness || { name: "direct", version: "1" }; })(),
 });
 // Backend response shapes are normalized here; views never import the original frontend.
 export function normalizeRun(r: any): Run {
   return {
     id: r.id,
+    benchmarkFingerprint: r.metadata?.benchmark_snapshot?.fingerprint || r.metadata?.agent_benchmark_fingerprint,
+    cacheHits: r.metrics?.cache_hits,
+    completedDocuments: r.metrics?.completed,
+    failedDocuments: r.metrics?.failed,
+    error: r.error_text,
     groupId:
       r.eval_group?.id || r.eval_experiment?.eval_group?.id || r.eval_group_id,
     groupName: r.eval_group?.name || r.eval_experiment?.eval_group?.name,
+    processorId: r.processor_version?.processor_id,
     experimentId: r.eval_experiment_id || r.eval_experiment?.id,
     config: r.processor_version
       ? {
           provider: r.processor_version.model?.provider || "local",
           model: r.processor_version.model?.name || "",
           parser: r.processor_version.parser?.name || "",
+          harness: r.processor_version.harness,
           prompt: r.processor_version.prompt?.extraction || "",
+          modelSettings: readModelSettings(r.processor_version.prompt),
           schema: JSON.stringify(r.processor_version.schema ?? {}, null, 2),
           baseUrl: r.processor_version.model?.base_url || "",
         }
@@ -59,9 +65,13 @@ export function normalizeRun(r: any): Run {
     model: r.processor_version?.model?.name || "Unknown",
     provider: r.processor_version?.model?.provider || "local",
     score: r.metrics?.field_accuracy ?? null,
-    cost: r.metrics?.cost_usd ?? 0,
+    cost: r.metrics?.cost_usd ?? null,
+    duration: r.started_at && r.completed_at
+      ? Math.max(0, (Date.parse(r.completed_at) - Date.parse(r.started_at)) / 1000)
+      : null,
     latency: (r.metrics?.average_latency_ms ?? 0) / 1000,
-    documents: r.extraction_count ?? r.extractions?.length ?? 0,
+    documents:
+      r.metrics?.documents ?? r.extraction_count ?? r.extractions?.length ?? 0,
     status: r.status === "completed" ? "Completed" : r.status,
     date: r.created_at,
     datasetId: r.dataset_id || "",
@@ -73,7 +83,7 @@ export function normalizeDocument(d: any): Document {
   return {
     id: d.id,
     name: d.filename || d.name,
-    src: `/v1/documents/${d.id}/source`,
+    src: workspaceUrl(`/v1/documents/${d.id}/source`),
     type: d.content_type || d.mime_type || "application/pdf",
     pages: d.page_count || 1,
     status: "Ready",
@@ -83,40 +93,48 @@ export function normalizeDocument(d: any): Document {
 export function extractionFields(e: any, groundTruth?: any): Field[] {
   return Object.entries(e?.result?.fields || {}).map(
     ([key, v]: [string, any]) => {
-      const evidence = v.evidence?.[0];
-      const page = e?.parser_ir?.pages?.find(
-        (p: any) => p.page === evidence?.page,
-      );
-      const bbox = evidence?.bbox;
+      const citations = extractionCitations(e, v?.evidence);
+      // Some structured extractors return a quoted excerpt alongside each
+      // value instead of geometric evidence. Keep it for PDF text grounding.
+      const parent = key.includes(".") ? key.slice(0, key.lastIndexOf(".")) : "";
+      const excerpt = parent && e?.result?.fields?.[`${parent}.excerpt`]?.value;
+      const location = parent && e?.result?.fields?.[`${parent}.location`]?.value;
       return {
         key,
-        value: v.value ?? null,
-        expected: groundTruth?.value?.[key] ?? null,
-        confidence: v.confidence ?? 0,
-        page: evidence?.page || 1,
-        ...(bbox?.length === 4 && page?.width && page?.height
-          ? {
-              area: {
-                left: (bbox[0] / page.width) * 100,
-                top: (bbox[1] / page.height) * 100,
-                width: ((bbox[2] - bbox[0]) / page.width) * 100,
-                height: ((bbox[3] - bbox[1]) / page.height) * 100,
-              },
-            }
+        value: v?.value ?? null,
+        ...expectedValue(groundTruth?.value, key),
+        ...confidenceFromResponse(v),
+        citations,
+        ...(typeof excerpt === "string" && excerpt.trim()
+          ? { sourceExcerpt: excerpt, sourceLocation: typeof location === "string" ? location : undefined }
           : {}),
+        page: citations[0]?.page || 1,
+        ...(citations[0] ? { area: citations[0].area } : {}),
       };
     },
   );
 }
-export async function loadWorkspace() {
-  const [d, s, r, p, g] = await Promise.all([
-    request("/documents"),
-    request("/datasets"),
-    request("/runs"),
-    request("/processors"),
-    request("/eval-groups"),
+export type AdapterCatalog = {
+  llm: {
+    id: string;
+    label: string;
+    models: string[];
+    default_endpoint?: string;
+    kind: string;
+  }[];
+  parsers: { id: string; label: string }[];
+};
+export async function loadWorkspace(signal = AbortSignal.timeout(15000)) {
+  const [d, s, r, p, g, a] = await Promise.all([
+    request("/documents", { signal }),
+    request("/datasets", { signal }),
+    request("/runs", { signal }),
+    request("/processors", { signal }),
+    request("/eval-groups", { signal }),
+    request("/adapters", { signal }),
   ]);
   return {
+    adapters: (a.adapters || a) as AdapterCatalog,
     documents: d.documents.map(normalizeDocument) as Document[],
     datasets: s.datasets.map((x: any) => ({
       id: x.id,
@@ -125,12 +143,23 @@ export async function loadWorkspace() {
       count: x.document_count ?? 0,
     })) as Dataset[],
     runs: r.runs.map(normalizeRun) as Run[],
-    processors: p.processors.map(normalizeProcessor),
+    processors: p.processors.map(
+      normalizeProcessor,
+    ) as import("./domain").Processor[],
     evalGroups: g.eval_groups.map((g: any) => ({
       id: g.id,
       name: g.name,
       datasetId: g.dataset_id,
       description: g.description,
+      experiments: (g.experiments || []).map((e: any) => ({
+        id: e.id,
+        name: e.name,
+        description: e.description,
+        date: e.created_at,
+        config: e.processor_version
+          ? versionConfig(e.processor_version)
+          : undefined,
+      })),
     })) as EvalGroup[],
   };
 }
@@ -141,13 +170,25 @@ export async function uploadDocument(file: File) {
     (await request("/documents", { method: "POST", body: form })).document,
   );
 }
-export async function inspectDocument(d: Document) {
-  const data = await request(`/documents/${d.id}`);
+export async function inspectDocument(
+  d: Document,
+  processorId?: string,
+  signal?: AbortSignal,
+) {
+  const data = await request(
+    `/documents/${d.id}${processorId ? `?processor=${encodeURIComponent(processorId)}` : ""}`,
+    { signal },
+  );
   return {
     ...d,
     fields: extractionFields(data.extraction, data.ground_truth),
+    groundTruth: data.ground_truth?.value || {},
+    groundTruthRevision: data.ground_truth?.revision || 0,
+    annotationStatus: data.ground_truth?.annotation_status,
+    annotationAuthor: data.ground_truth?.author,
     runId: data.extraction?.run_id,
     warnings: data.extraction?.warnings || [],
+    harnessSteps: data.extraction?.result?.provenance?.harness_steps,
   };
 }
 export async function previewDocument(
@@ -155,9 +196,15 @@ export async function previewDocument(
   c: Config,
   processor: string,
 ) {
+  const saved = (await request(`/processors/${encodeURIComponent(processor)}`))
+    .processor;
+  const latest = [...saved.versions].sort((a, b) => b.version - a.version)[0];
   return request(`/processors/${encodeURIComponent(processor)}/draft/preview`, {
     method: "POST",
-    body: JSON.stringify({ document_id: d.id, config: configPayload(c) }),
+    body: JSON.stringify({
+      document_id: d.id,
+      config: mergeEditableConfig(latest, c),
+    }),
   });
 }
 export async function newProcessor(name: string, c: Config, description = "") {
@@ -170,6 +217,7 @@ export async function runBenchmark(
   c: Config,
   name: string,
   group?: { id?: string; name?: string; processorId?: string },
+  background = false,
 ) {
   let groupId = group?.id;
   if (!groupId && !group?.name) {
@@ -215,6 +263,8 @@ export async function runBenchmark(
     eval_experiment_id: experiment.id,
     dataset_id: datasetId,
     metadata: { name },
+    force_refresh: true,
+    background,
   });
   return result.run ? normalizeRun(result.run) : null;
 }
@@ -247,10 +297,12 @@ export async function createDataset(name: string, documentIds: string[]) {
 
 export function versionConfig(v: any): Config {
   return {
+    harness: v.harness,
     provider: v.model?.provider || "local",
     model: v.model?.name || "",
     parser: v.parser?.name || "native",
     prompt: v.prompt?.extraction || "",
+    modelSettings: readModelSettings(v.prompt),
     schema: JSON.stringify(
       v.schema ?? { type: "object", properties: {} },
       null,
@@ -266,6 +318,8 @@ export function normalizeProcessor(p: any): import("./domain").Processor {
       version: v.version,
       config: versionConfig(v),
       date: v.created_at,
+      author: v.author,
+      status: v.status,
     }))
     .sort((a: any, b: any) => b.version - a.version);
   return {
@@ -283,35 +337,67 @@ export async function saveProcessorVersion(
   id: string,
   config: Config,
   details?: { name: string; description: string },
+  expectedVersion?: number,
 ) {
+  const { processor } = await request(`/processors/${encodeURIComponent(id)}`);
+  const latest = processor.versions[0];
+  const expected = expectedVersion ?? latest.version;
+  if (expected !== latest.version)
+    throw new Error("Processor changed in another session. Select its latest version and reapply your edits before saving.");
+  const { version } = await post(`/processors/${encodeURIComponent(id)}/versions`, {
+    config: mergeEditableConfig(latest, config),
+    expected_version: expected,
+    author: "local",
+    status: "published",
+  });
   if (details)
     await request(`/processors/${encodeURIComponent(id)}`, {
       method: "PATCH",
       body: JSON.stringify(details),
     });
-  const { harness, ...editable } = configPayload(config);
-  // Preserve harness, normalization, and provider-specific options that are not exposed in this editor.
-  const { draft } = await request(
-    `/processors/${encodeURIComponent(id)}/draft`,
-  );
+  return version;
+}
+
+// Merge the controls exposed in Studio without discarding backend-only options.
+export function mergeEditableConfig(base: any, config: Config) {
+  const editable = configPayload(config);
   const merged = {
     ...editable,
+    harness: config.harness ?? base?.harness ?? editable.harness,
+    ...(base?.normalization ? { normalization: base.normalization } : {}),
     parser: {
-      ...(draft.parser?.name === config.parser ? draft.parser : {}),
+      ...(base?.parser?.name === config.parser ? base.parser : {}),
       ...editable.parser,
     },
     model: {
-      ...(draft.model?.provider === config.provider ? draft.model : {}),
+      ...(base?.model?.provider === config.provider ? base.model : {}),
       ...editable.model,
     },
-    prompt: { ...draft.prompt, ...editable.prompt },
+    prompt: settingsPrompt(config, base?.prompt),
   };
   if (!["ollama", "openai-compatible"].includes(config.provider))
     delete merged.model.base_url;
-  await request(`/processors/${encodeURIComponent(id)}/draft`, {
-    method: "PATCH",
-    body: JSON.stringify({ config: merged }),
+  return merged;
+}
+
+export async function saveGroundTruth(
+  documentId: string,
+  value: Record<string, import("./domain").JsonValue>,
+  expectedRevision?: number,
+) {
+  const revision = expectedRevision ?? (await request(`/documents/${encodeURIComponent(documentId)}/ground-truth`)).ground_truth?.revision ?? 0;
+  return post(`/documents/${encodeURIComponent(documentId)}/ground-truth`, {
+    value,
+    annotation_status: "complete",
+    expected_revision: revision,
+    author: "local",
   });
-  return (await post(`/processors/${encodeURIComponent(id)}/draft/publish`, {}))
-    .version;
+}
+export async function addDatasetDocument(
+  datasetId: string,
+  documentId: string,
+) {
+  return post(`/datasets/${encodeURIComponent(datasetId)}/documents`, {
+    document_id: documentId,
+  });
 }

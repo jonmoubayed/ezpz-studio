@@ -1,4 +1,5 @@
 import type { Config } from "./domain";
+import { harnessError } from "./harness.ts";
 
 // Render readable Python literals without interpolating user text as code.
 function pyLiteral(value: unknown, depth = 0): string {
@@ -22,8 +23,40 @@ export function generateProcessorCode(config: Config) {
   }
   const providers = ["local", "openai", "anthropic", "google", "gemini", "ollama", "openai-compatible"];
   if (!providers.includes(config.provider)) throw new Error(`Unsupported provider: ${config.provider}`);
-  if (!["native", "docling", "llama-parse"].includes(config.parser)) throw new Error(`Unsupported parser: ${config.parser}`);
+  if (!["none", "native", "docling", "llama-parse"].includes(config.parser)) throw new Error(`Unsupported parser: ${config.parser}`);
   if (!config.model.trim()) throw new Error("Enter a model ID before copying code.");
+  if (config.harness && config.harness.name !== "direct" && config.harness.name !== "parse_extract") {
+    const error = harnessError(config.harness);
+    if (error) throw new Error(error);
+    const version = {
+      id: "exported-processor", schema,
+      model: { provider: config.provider, name: config.model, ...(["ollama", "openai-compatible"].includes(config.provider) ? { base_url: config.baseUrl } : {}) },
+      parser: { name: config.parser, version: "1" },
+      prompt: { ...config.modelSettings, extraction: config.prompt }, harness: config.harness,
+    };
+    return {
+      setup: ["Run from the ezpz checkout after installing requirements.lock.", "Configure credentials for every model and parser used by the harness.", "Rerun with the same source and configuration to resume saved work. Use a new execution directory for a fresh extraction."],
+      code: `from pathlib import Path
+import hashlib
+import json
+import mimetypes
+from backend.harness_runtime import execute_harness
+from backend.model import create_model_adapter
+
+source = Path("document.pdf")
+data = source.read_bytes()
+version = ${pyLiteral(JSON.parse(JSON.stringify(version)))}
+execution_id = hashlib.sha256(data + json.dumps(version, sort_keys=True).encode()).hexdigest()
+document = {"id": execution_id, "filename": source.name,
+            "mime_type": mimetypes.guess_type(source.name)[0] or "application/octet-stream"}
+parser_ir, result = execute_harness(
+    document, data, version, create_model_adapter,
+    Path(".ezpz/harness-exports") / execution_id, execution_id,
+)
+print(json.dumps(result.output, indent=2))
+`,
+    };
+  }
 
   const packages = new Set<string>();
   const env: string[] = [];
@@ -46,6 +79,31 @@ export function generateProcessorCode(config: Config) {
     }
     if (config.provider === "ollama") endpoint = endpoint.replace(/\/v1$/, "");
     else if (!url.pathname || url.pathname === "/") endpoint += "/v1";
+  }
+
+  if (config.parser === "none") {
+    const directSetup = [
+      "Run from the ezpz repository root after installing requirements.txt.",
+      env.length ? `Set environment variables: ${env.join(", ")}.` : "Configure the selected model endpoint as needed.",
+      "PDF/image input requires a compatible OpenAI, Anthropic, or Gemini model.",
+      "Run: python extract.py /path/to/document.pdf",
+    ];
+    const model = { provider: config.provider === "google" ? "gemini" : config.provider, name: config.model,
+      ...(["ollama", "openai-compatible"].includes(config.provider) ? {base_url: config.provider === "ollama" ? `${endpoint}/v1` : endpoint} : {}) };
+    return { setup: directSetup, code: [
+      ["# Extract directly from the original document; source boxes are model estimates.", ...directSetup.map(line => `# ${line}`)].join("\n"),
+      "import json\nimport mimetypes\nimport sys\nfrom pathlib import Path\nfrom backend.grounding import original_document_ir\nfrom backend.model import create_model_adapter",
+      `SCHEMA = ${pyLiteral(schema)}\nINSTRUCTIONS = ${pyLiteral(config.prompt)}\nMODEL = ${pyLiteral(config.model)}`,
+      `source = Path(sys.argv[1])
+document_ir = original_document_ir(
+    {"id": "source", "filename": source.name,
+     "mime_type": mimetypes.guess_type(source.name)[0] or "application/octet-stream"}, source.read_bytes(),
+)
+result = create_model_adapter(${pyLiteral(model)}).run(
+    document_ir, SCHEMA, ${pyLiteral({...config.modelSettings, extraction: config.prompt})},
+).output
+print(json.dumps(result, ensure_ascii=False, indent=2))`,
+    ].join("\n\n") };
   }
 
   const setup = [

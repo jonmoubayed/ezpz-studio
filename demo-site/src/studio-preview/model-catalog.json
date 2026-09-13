@@ -1,0 +1,59 @@
+{
+  "updated_at": "2026-09-06",
+  "providers": {
+    "openai": [
+      "gpt-6-astra",
+      "gpt-5.6-sol",
+      "gpt-5.6-terra",
+      "gpt-5.6-luna",
+      "gpt-5",
+      "gpt-5-mini",
+      "gpt-5-nano",
+      "gpt-4.1",
+      "gpt-4.1-mini",
+      "gpt-4.1-nano",
+      "gpt-4o",
+      "gpt-4o-mini",
+      "o3",
+      "o4-mini"
+    ],
+    "anthropic": [
+      "claude-sonnet-5",
+      "claude-opus-5",
+      "claude-fable-5-1",
+      "claude-haiku-4-5-20251001"
+    ],
+    "gemini": [
+      "gemini-3.8-flash",
+      "gemini-3.5-flash-lite",
+      "gemini-3.1-pro-preview",
+      "gemini-3.1-flash-lite",
+      "gemini-2.5-pro",
+      "gemini-2.5-flash"
+    ],
+    "openai_compatible": [
+      "llama3.2",
+      "llama-3.1-8b",
+      "qwen2.5-7b",
+      "mistral-small",
+      "deepseek-r1"
+    ],
+    "google": [
+      "gemini-3.8-flash",
+      "gemini-3.5-flash-lite",
+      "gemini-3.1-pro-preview",
+      "gemini-3.1-flash-lite",
+      "gemini-2.5-pro",
+      "gemini-2.5-flash"
+    ],
+    "local": [
+      "deterministic-local"
+    ],
+    "ollama": [
+      "qwen3:8b",
+      "llama3.2",
+      "deepseek-r1"
+    ],
+    "openai-compatible": []
+  }
+}

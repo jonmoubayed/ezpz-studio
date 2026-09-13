@@ -1,8 +1,8 @@
-import { extractionValues, fieldTree } from "./extraction-output";
+import { answerFields, extractionValues, fieldTree } from "./extraction-output";
 import { ExtractionFields } from "./extraction-fields";
 import { StructuredValue, isObjectArray } from "./structured-value";
 import { isLowConfidence } from "./confidence";
-import { ExpectedValuesEditor, FieldValues } from "./expected-values";
+import { ExpectedValuesEditor, ExpectedFieldValue, FieldValues } from "./expected-values";
 import { FieldSelect } from "./components/field-select";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import {
@@ -606,7 +606,7 @@ export function ReviewQueue() {
   const items = s.reviewDocuments
     .filter((d) => s.mode === "demo" || d.runId)
     .flatMap((d) =>
-      d.fields
+      answerFields(d.fields)
         .filter(
           (f) =>
             filter === "all" ||
@@ -814,15 +814,7 @@ export function ReviewQueue() {
                 </div>
                 <div>
                   <span>EXPECTED VALUE</span>
-                  {current.f.expected === null &&
-                  (!current.f.status || current.f.status === "unscored") ? (
-                    <code>Not annotated</code>
-                  ) : (
-                    <StructuredValue
-                      value={current.f.expected}
-                      label={`${current.f.key} expected`}
-                    />
-                  )}
+                  <ExpectedFieldValue field={current.f} />
                 </div>
               </div>
               {current.review && (
