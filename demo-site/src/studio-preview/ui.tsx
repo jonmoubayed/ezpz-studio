@@ -1,3 +1,10 @@
+import {
+  confidenceLabel,
+  confidenceDescription,
+  isLowConfidence,
+  hasConfidence,
+} from "./confidence";
+import type { Field } from "./domain";
 import type { ReactNode } from "react";
 import { ArrowUpRight, ChevronRight, Loader2, X } from "lucide-react";
 import {
@@ -92,6 +99,7 @@ export function Modal({
   onClose,
   children,
   wide = false,
+  onCloseAutoFocus,
 }: {
   title: string;
   description?: string;
@@ -99,10 +107,11 @@ export function Modal({
   onClose: () => void;
   children: ReactNode;
   wide?: boolean;
+  onCloseAutoFocus?: (event: Event) => void;
 }) {
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className={wide ? "studio-modal wide" : "studio-modal"}>
+      <DialogContent className={wide ? "studio-modal wide" : "studio-modal"} onCloseAutoFocus={onCloseAutoFocus}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>
@@ -203,5 +212,21 @@ export function Notice({
         </button>
       )}
     </div>
+  );
+}
+
+export function ConfidenceBadge({ field }: { field: Field }) {
+  return (
+    <span
+      className={`badge ${isLowConfidence(field) ? "orange" : "neutral"}`}
+      title={confidenceDescription(field)}
+      aria-label={
+        hasConfidence(field)
+          ? `${confidenceLabel(field)} confidence`
+          : "Confidence not provided"
+      }
+    >
+      {confidenceLabel(field)}
+    </span>
   );
 }

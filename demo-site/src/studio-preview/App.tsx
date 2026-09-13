@@ -1,3 +1,6 @@
+import { version as studioVersion } from "./studio-package.json";
+import { WorkspaceSwitcher } from "./workspace-switcher";
+import { isLowConfidence } from "./confidence";
 import { lazy, Suspense, useEffect, useState } from "react";
 import {
   Activity,
@@ -64,13 +67,13 @@ export default function App() {
     media.addEventListener("change", change);
     return () => media.removeEventListener("change", change);
   }, []);
-  const remaining = s.documents.reduce(
+  const remaining = s.reviewDocuments.reduce(
     (n, d) =>
       n +
       d.fields.filter(
         (f) =>
           (s.mode === "demo" || !!d.runId) &&
-          (f.confidence < 0.9 ||
+          (isLowConfidence(f) ||
             (f.status && f.status !== "correct" && f.status !== "unscored")) &&
           !s.reviews.some(
             (r) =>
@@ -159,21 +162,9 @@ export default function App() {
           <strong>
             ezpz<span>studio</span>
           </strong>
-          <span className="brand-version">beta</span>
+          <span className="brand-version">v{studioVersion}</span>
         </a>
-        <button
-          className="workspace-switch"
-          onClick={() => navigate("Settings")}
-        >
-          <span className="workspace-symbol">
-            <Box size={17} />
-          </span>
-          <span>
-            <strong>My workspace</strong>
-            <small>Local environment</small>
-          </span>
-          <ChevronDown size={14} />
-        </button>
+        <WorkspaceSwitcher />
         <button className="search-trigger" onClick={() => setSearchOpen(true)}>
           <Search size={15} />
           <span>Quick search</span>
@@ -220,7 +211,11 @@ export default function App() {
               <strong>Local workspace</strong>
               <small>
                 <i />
-                {s.mode === "demo" ? "Demo mode" : "API connected"}
+                {s.mode === "demo"
+                  ? "Demo mode"
+                  : s.connection === "ready"
+                    ? "API connected"
+                    : "API offline"}
               </small>
             </div>
             <Monitor size={16} />
@@ -245,9 +240,17 @@ export default function App() {
             <strong>{s.page}</strong>
           </div>
           <div className="topbar-right">
-            <span className={`connection-pill ${s.mode}`}>
+            <span
+              className={`connection-pill ${s.mode === "live" && s.connection !== "ready" ? "offline" : s.mode}`}
+            >
               <i />
-              {s.mode === "demo" ? "Demo workspace" : "Local API connected"}
+              {s.mode === "demo"
+                ? "Demo workspace"
+                : s.connection === "ready"
+                  ? "Local API connected"
+                  : s.connection === "connecting"
+                    ? "Connecting…"
+                    : "API offline"}
             </span>
             <button
               className="icon-button"
@@ -263,12 +266,31 @@ export default function App() {
         </header>
         <main
           id="main"
-          className={`main-content ${s.page === "Playground" || s.page === "Review queue" ? "workbench-main" : ""}`}
+          className={`main-content ${s.page === "Playground" || s.page === "Configuration" || s.page === "Review queue" ? "workbench-main" : ""}`}
         >
           {s.message && (
             <Notice onClose={() => s.setMessage("")}>{s.message}</Notice>
           )}
-          {s.page === "Overview" ? (
+          {s.connection !== "ready" ? (
+            <section className="panel connection-state">
+              {s.connection === "connecting" ? (
+                <Busy label="Connecting to your local workspace…" />
+              ) : (
+                <>
+                  <h2>Your local backend is unavailable</h2>
+                  <p>
+                    Start the workspace with <code>ezpz studio</code>, then
+                    reconnect to load your saved documents, processors, and
+                    evaluations.
+                  </p>
+                  <Button variant="primary" onClick={s.connect}>
+                    Reconnect
+                  </Button>{" "}
+                  <Button onClick={s.demo}>Explore demo</Button>
+                </>
+              )}
+            </section>
+          ) : s.page === "Overview" ? (
             <Overview />
           ) : s.page === "Playground" ? (
             <Playground />
@@ -299,7 +321,9 @@ export default function App() {
           <span>
             {s.mode === "demo"
               ? "Illustrative demo data · no model calls"
-              : "Connected to your ezpz backend"}
+              : s.connection === "ready"
+                ? "Connected to your ezpz backend"
+                : "Waiting for local backend"}
             <span className="footer-sep">/</span>ezpz studio
           </span>
         </footer>

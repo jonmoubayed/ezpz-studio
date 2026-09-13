@@ -1,12 +1,14 @@
-import { useState } from "react";
+import { extractionValues, fieldTree } from "./extraction-output";
+import { ExtractionFields } from "./extraction-fields";
+import { ConfidenceBadge } from "./ui";
+import { ExpectedValuesEditor, FieldValues } from "./expected-values";
+import { withExpectedValues } from "./result-model";
+import { FieldSelect } from "./components/field-select";
+import { useRef, useState } from "react";
 import {
-  ArrowLeft,
-  ArrowRight,
   Braces,
   Check,
   Code2,
-  FileScan,
-  Plus,
   Download,
   Focus,
   ChevronDown,
@@ -20,14 +22,16 @@ import {
 } from "./components/extend/schema-builder";
 import { readSchema, writeSchema, type SchemaDocument } from "./schema-adapter";
 import { ProcessorCodePanel } from "./processor-code-panel";
+import { HarnessEditor } from "./harness-editor";
+import { HarnessTrace } from "./harness-trace";
+import { harnessError } from "./harness";
 import { ConfigForm } from "./pages";
 import { useStudio } from "./store";
 import { Badge, Button, Busy, Empty, Heading } from "./ui";
 
-import { SourceViewer } from "./workbench";
+import { WorkbenchControls, WorkbenchSource } from "./workbench";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "./components/ui/tabs";
 import {
-  displayValue,
   downloadJson,
   type Document as SourceDocument,
   type Config,
@@ -36,6 +40,8 @@ import {
 type Preview = { document: SourceDocument; config: Config; demo: boolean };
 export function Configuration() {
   const s = useStudio();
+  const settings = useRef<HTMLDetailsElement>(null);
+  const schemaSection = useRef<HTMLElement>(null);
   const [pane, setPane] = useState("configure");
   const [previews, setPreviews] = useState<Record<string, Preview>>({});
   const [running, setRunning] = useState(false);
@@ -44,7 +50,7 @@ export function Configuration() {
   const source = s.selected;
   const preview = source ? previews[source.id] : undefined;
   const field =
-    pane === "results"
+    pane === "results" && !running && !previewError
       ? preview?.document.fields.find((f) => f.key === activeField)
       : undefined;
   async function runExtraction() {
@@ -98,7 +104,7 @@ export function Configuration() {
     }
   });
   const [jsonDirty, setJsonDirty] = useState(false);
-  const valid = !error && !jsonDirty;
+  const valid = !error && !jsonDirty && !harnessError(s.config.harness);
   const update = (next: SchemaBuilderSchema) => {
     setSchema(next);
     try {
@@ -142,28 +148,6 @@ export function Configuration() {
   };
   return (
     <div className="configuration-page">
-      <div className="configuration-trail">
-        <button
-          onClick={() =>
-            s.navigate(s.activeProcessor ? "Processors" : "Playground")
-          }
-        >
-          <ArrowLeft size={14} />{" "}
-          {s.activeProcessor ? "Processors" : "Playground"}
-        </button>
-        <span>/</span>
-        <span>Edit configuration</span>
-        <Badge tone={valid ? "green" : "orange"}>
-          {valid ? (
-            <>
-              <Check size={12} />{" "}
-              {s.activeProcessor ? "Local working copy" : "Saved locally"}
-            </>
-          ) : (
-            "Unsaved schema changes"
-          )}
-        </Badge>
-      </div>
       <Heading
         title={
           s.activeProcessor
@@ -207,13 +191,45 @@ export function Configuration() {
           </>
         }
       />
-      <div className="processor-workspace">
+      <WorkbenchControls
+        status={!valid ? "Unsaved schema changes" : "Working configuration"}
+        onConfigure={() => {
+          setPane("configure");
+          if (settings.current) settings.current.open = true;
+        }}
+        onSchema={() => {
+          setPane("configure");
+          if (settings.current) settings.current.open = false;
+          requestAnimationFrame(() =>
+            schemaSection.current?.scrollIntoView({ block: "nearest" }),
+          );
+        }}
+      />
+      <div className={`workbench-layout processor-workspace${pane === "harness" ? " harness-workspace" : ""}`}>
+        <WorkbenchSource
+          document={source}
+          field={field}
+          label="Processor source document"
+          onDocumentChange={() => {
+            setActiveField("");
+            setPreviewError("");
+          }}
+        />
         <Tabs
           value={pane}
           onValueChange={setPane}
-          className="processor-workspace-editor"
+          className="results-pane processor-workspace-editor"
         >
-          <div className="processor-pane-tabs">
+          <div className="pane-heading">
+            <span className="results-title">
+              <Braces size={17} />
+              Processor workspace
+            </span>
+            <Badge>
+              {s.activeProcessor ? `v${s.activeProcessor.version}` : "Draft"}
+            </Badge>
+          </div>
+          <div className="processor-pane-tabs results-tabs">
             <TabsList aria-label="Processor workspace">
               <TabsTrigger value="configure">
                 <Settings2 size={14} />
@@ -222,16 +238,17 @@ export function Configuration() {
               <TabsTrigger value="results">
                 <Braces size={14} />
                 Results{" "}
-                {preview && <span>{preview.document.fields.length}</span>}
+                {preview && <span>{fieldTree(preview.document.fields).length}</span>}
               </TabsTrigger>
+              <TabsTrigger value="harness">Harness</TabsTrigger>
               <TabsTrigger value="code">
                 <Code2 size={14} /> Code
               </TabsTrigger>
             </TabsList>
-            <span>
-              {running ? "Running extraction…" : "Build → test → refine"}
-            </span>
           </div>
+          <TabsContent value="harness" className="processor-config-content">
+            <HarnessEditor config={s.config} onChange={s.updateConfig} live={s.mode === "live"} />
+          </TabsContent>
           <TabsContent
             value="configure"
             forceMount
@@ -260,28 +277,34 @@ export function Configuration() {
                   <div className="processor-history">
                     <label>
                       Saved versions
-                      <select
+                      <FieldSelect
                         aria-label="Load processor version"
                         defaultValue=""
-                        onChange={(e) => {
+                        onValueChange={(value) => {
                           const v = s.activeProcessor?.versions.find(
-                            (v) => v.id === e.target.value,
+                            (v) => v.id === value,
                           );
                           if (v) {
                             s.chooseProcessor(s.activeProcessor!, v.config);
                           }
                         }}
-                      >
-                        <option value="" disabled>
-                          Load a saved version…
-                        </option>
-                        {s.activeProcessor.versions.map((v) => (
-                          <option key={v.id} value={v.id}>
-                            v{v.version} ·{" "}
-                            {new Date(v.date).toLocaleDateString()}
-                          </option>
-                        ))}
-                      </select>
+                        options={[
+                          {
+                            value: "",
+                            label: "Load a saved version…",
+                            disabled: true,
+                          },
+                          ...s.activeProcessor.versions.map((v) => ({
+                            value: v.id,
+                            label:
+                              "v" +
+                              v.version +
+                              " · " +
+                              new Date(v.date).toLocaleDateString() +
+                              (v.author?.startsWith("mcp:") ? ` · ${v.author} · ${v.status === "draft" ? "candidate" : "published"}` : ""),
+                          })),
+                        ]}
+                      />
                     </label>
                     <button onClick={s.saveAsProcessor}>
                       Save as new processor
@@ -292,24 +315,32 @@ export function Configuration() {
             )}
             <div className="configuration-layout">
               <div className="configuration-sections">
-                <section className="configuration-card">
-                  <div className="configuration-section-title">
+                <details
+                  ref={settings}
+                  className="configuration-card processor-extraction-settings"
+                >
+                  <summary className="configuration-section-title">
                     <span className="configuration-section-icon">
                       <Settings2 size={17} />
                     </span>
                     <div>
                       <h2>Extraction settings</h2>
-                      <p>Use any provider. Keep your workflow.</p>
+                      <p>
+                        {s.config.model} · {s.config.parser}
+                      </p>
                     </div>
-                    <span className="configuration-number">01</span>
-                  </div>
+                    <ChevronDown size={14} className="configuration-number" />
+                  </summary>
                   <ConfigForm
                     config={s.config}
                     onChange={s.updateConfig}
                     showSchema={false}
                   />
-                </section>
-                <section className="configuration-card schema-card">
+                </details>
+                <section
+                  ref={schemaSection}
+                  className="configuration-card schema-card"
+                >
                   <div className="configuration-section-title">
                     <span className="configuration-section-icon">
                       <Braces size={18} />
@@ -449,67 +480,6 @@ export function Configuration() {
             )}
           </TabsContent>
         </Tabs>
-        <section
-          className="source-pane processor-build-source"
-          aria-label="Processor source document"
-        >
-          <div className="pane-heading">
-            <FileScan size={15} />
-            <select
-              aria-label="Processor source document"
-              value={source?.id || ""}
-              disabled={running}
-              onChange={(e) => {
-                s.setSelectedId(e.target.value);
-                setActiveField("");
-                setPreviewError("");
-              }}
-            >
-              {!source && <option value="">Choose a document</option>}
-              {s.documents.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-            </select>
-            <Button
-              title="Upload source document"
-              disabled={s.busy}
-              onClick={() => s.setUploadOpen(true)}
-            >
-              <Plus size={14} />
-            </Button>
-          </div>
-          {source ? (
-            <SourceViewer document={source} field={field} />
-          ) : (
-            <Empty
-              title="Add a test document"
-              description="Keep the source beside your schema as you build."
-              action={
-                <Button onClick={() => s.setUploadOpen(true)}>
-                  <Plus size={14} />
-                  Add document
-                </Button>
-              }
-            />
-          )}
-          <div className="source-footer">
-            <span>
-              <Focus size={12} />
-              {field?.area
-                ? `${field.key} · page ${field.page || 1}`
-                : "Source document"}
-            </span>
-            {source && (
-              <a href={source.src} download={source.name}>
-                <Download size={12} />
-                Download
-              </a>
-            )}
-            <span>Extend UI</span>
-          </div>
-        </section>
       </div>
     </div>
   );
@@ -526,10 +496,13 @@ function ProcessorPreview({
   activeField: string;
   onField: (key: string) => void;
 }) {
+  const s = useStudio();
+  const latest = s.documents.find((d) => d.id === preview.document.id);
+  const resultDocument = latest?.groundTruth
+    ? withExpectedValues(preview.document, latest.groundTruth)
+    : preview.document;
   const [view, setView] = useState("fields");
-  const output = Object.fromEntries(
-    preview.document.fields.map((f) => [f.key, f.value]),
-  );
+  const output = extractionValues(preview.document.fields);
   return (
     <div className="processor-preview">
       <div className="processor-preview-status">
@@ -537,7 +510,7 @@ function ProcessorPreview({
           <Check size={13} />
           {preview.demo ? "Sample extraction" : "Extraction complete"}
         </span>
-        <Badge>{preview.document.fields.length} fields</Badge>
+        <Badge>{fieldTree(preview.document.fields).length} fields</Badge>
       </div>
       <div className="processor-preview-context">
         <span>
@@ -575,22 +548,28 @@ function ProcessorPreview({
         <TabsList aria-label="Extraction output format">
           <TabsTrigger value="fields">Fields</TabsTrigger>
           <TabsTrigger value="json">JSON</TabsTrigger>
+          <TabsTrigger value="expected">Expected</TabsTrigger>
+          <TabsTrigger value="steps">Execution steps</TabsTrigger>
         </TabsList>
+        <TabsContent value="steps"><HarnessTrace steps={preview.document.harnessSteps} /></TabsContent>
         <TabsContent value="fields">
           <div className="processor-preview-fields">
-            {preview.document.fields.map((f) => (
-              <button
+            <ExtractionFields fields={resultDocument.fields} renderField={(f, name) => (
+              <article
                 className={`processor-preview-field ${activeField === f.key ? "active" : ""}`}
                 key={f.key}
                 onClick={() => onField(f.key)}
               >
-                <span>
-                  <strong>{f.key}</strong>
-                  <Badge tone={f.confidence < 0.9 ? "orange" : "green"}>
-                    {Math.round(f.confidence * 100)}%
-                  </Badge>
-                </span>
-                <code>{displayValue(f.value)}</code>
+                <button
+                  type="button"
+                  className="field-source-trigger"
+                  aria-label={`Inspect source for ${f.key}`}
+                  aria-pressed={activeField === f.key}
+                >
+                  <strong>{name}</strong>
+                  <ConfidenceBadge field={f} />
+                </button>
+                <FieldValues field={f} />
                 <small>
                   {f.area ? (
                     <>
@@ -601,8 +580,8 @@ function ProcessorPreview({
                     "No source citation"
                   )}
                 </small>
-              </button>
-            ))}
+              </article>
+            )} />
             {!preview.document.fields.length && (
               <Empty
                 title="No fields returned"
@@ -610,6 +589,12 @@ function ProcessorPreview({
               />
             )}
           </div>
+        </TabsContent>
+        <TabsContent value="expected">
+          <ExpectedValuesEditor
+            key={resultDocument.id}
+            document={resultDocument}
+          />
         </TabsContent>
         <TabsContent value="json">
           <pre className="json-output">{JSON.stringify(output, null, 2)}</pre>

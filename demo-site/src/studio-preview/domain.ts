@@ -1,3 +1,5 @@
+import { workspaceStorage } from "./workspace-context";
+import type { ModelSettings } from "./model-settings";
 export type Page =
   | "Overview"
   | "Playground"
@@ -9,12 +11,7 @@ export type Page =
   | "Review queue"
   | "Settings";
 export type JsonValue =
-  | string
-  | number
-  | boolean
-  | null
-  | JsonValue[]
-  | { [key: string]: JsonValue };
+  string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 export function displayValue(value: JsonValue): string {
   return value === null
     ? "null"
@@ -22,16 +19,27 @@ export function displayValue(value: JsonValue): string {
       ? JSON.stringify(value)
       : String(value);
 }
+export type Citation = {
+  source?: "model";
+  page: number;
+  area: { left: number; top: number; width: number; height: number };
+};
 export type Field = {
+  sourceExcerpt?: string;
+  sourceLocation?: string;
+  hasExpected?: boolean;
+  citations?: Citation[];
   key: string;
   value: JsonValue;
   expected: JsonValue;
-  confidence: number;
+  confidence: number | null;
+  confidenceSource?: "model_reported" | "heuristic" | "sample";
   status?: string;
   area?: { left: number; top: number; width: number; height: number };
   page?: number;
 };
 export type Document = {
+  harnessSteps?: import("./harness-trace").HarnessStep[];
   id: string;
   name: string;
   src: string;
@@ -39,17 +47,35 @@ export type Document = {
   pages: number;
   status: string;
   fields: Field[];
+  groundTruth?: Record<string, JsonValue>;
+  groundTruthRevision?: number;
+  annotationStatus?: string;
+  annotationAuthor?: string;
   sample?: boolean;
   runId?: string;
   warnings?: string[];
 };
+export type EvalExperiment = {
+  id: string;
+  name: string;
+  description?: string;
+  date: string;
+  config?: Config;
+};
 export type EvalGroup = {
+  experiments?: EvalExperiment[];
   id: string;
   name: string;
   datasetId: string;
   description?: string;
 };
 export type Run = {
+  benchmarkFingerprint?: string;
+  cacheHits?: number;
+  completedDocuments?: number;
+  failedDocuments?: number;
+  error?: string;
+  processorId?: string;
   groupId?: string;
   groupName?: string;
   experimentId?: string;
@@ -59,7 +85,8 @@ export type Run = {
   model: string;
   provider: string;
   score: number | null;
-  cost: number;
+  cost: number | null;
+  duration?: number | null;
   latency: number;
   documents: number;
   status: string;
@@ -76,6 +103,8 @@ export type Dataset = {
   members?: string[];
 };
 export type Config = {
+  harness?: import("./harness").HarnessConfig;
+  modelSettings?: ModelSettings;
   provider: string;
   model: string;
   parser: string;
@@ -130,6 +159,7 @@ export const sampleDocuments: Document[] = vendors.map((vendor, i) => ({
       key: "invoice_number",
       value: `INV-2026-00${i + 1}`,
       expected: `INV-2026-00${i + 1}`,
+      confidenceSource: "sample",
       confidence: 0.99,
       area: { left: 65, top: 14, width: 25, height: 3 },
     },
@@ -137,6 +167,7 @@ export const sampleDocuments: Document[] = vendors.map((vendor, i) => ({
       key: "vendor",
       value: vendor,
       expected: vendor,
+      confidenceSource: "sample",
       confidence: 0.99,
       area: { left: 9, top: 9, width: 50, height: 4 },
     },
@@ -144,6 +175,7 @@ export const sampleDocuments: Document[] = vendors.map((vendor, i) => ({
       key: "invoice_date",
       value: "2026-09-01",
       expected: "2026-09-01",
+      confidenceSource: "sample",
       confidence: 0.98,
       area: { left: 65, top: 21, width: 25, height: 3 },
     },
@@ -151,6 +183,7 @@ export const sampleDocuments: Document[] = vendors.map((vendor, i) => ({
       key: "due_date",
       value: "2026-09-30",
       expected: "2026-09-30",
+      confidenceSource: "sample",
       confidence: 0.97,
       area: { left: 65, top: 27, width: 25, height: 3 },
     },
@@ -158,6 +191,7 @@ export const sampleDocuments: Document[] = vendors.map((vendor, i) => ({
       key: "subtotal",
       value: 2400 + i * 180,
       expected: 2400 + i * 180,
+      confidenceSource: "sample",
       confidence: 0.99,
       area: { left: 68, top: 64, width: 23, height: 3 },
     },
@@ -165,6 +199,7 @@ export const sampleDocuments: Document[] = vendors.map((vendor, i) => ({
       key: "tax",
       value: i === 1 ? 180 : (2400 + i * 180) * 0.08,
       expected: (2400 + i * 180) * 0.08,
+      confidenceSource: "sample",
       confidence: i === 1 ? 0.72 : 0.99,
       area: { left: 68, top: 68, width: 23, height: 3 },
     },
@@ -172,6 +207,7 @@ export const sampleDocuments: Document[] = vendors.map((vendor, i) => ({
       key: "total",
       value: Number(((2400 + i * 180) * 1.08).toFixed(2)),
       expected: Number(((2400 + i * 180) * 1.08).toFixed(2)),
+      confidenceSource: "sample",
       confidence: i === 4 ? 0.78 : 0.99,
       area: { left: 65, top: 73, width: 27, height: 5 },
     },
@@ -304,7 +340,7 @@ export function pct(value: number | null) {
 }
 export function readStored<T>(key: string, fallback: T): T {
   try {
-    return JSON.parse(localStorage.getItem(key) || "null") ?? fallback;
+    return JSON.parse(workspaceStorage.getItem(key) || "null") ?? fallback;
   } catch {
     return fallback;
   }
@@ -328,7 +364,7 @@ export type Processor = {
   version: number;
   versionId?: string;
   updatedAt: string;
-  versions: { id: string; version: number; config: Config; date: string }[];
+  versions: { id: string; version: number; config: Config; date: string; author?: string; status?: string }[];
 };
 export const processorStarters: {
   id: string;

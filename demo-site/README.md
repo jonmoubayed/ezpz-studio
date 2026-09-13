@@ -55,4 +55,4 @@ pnpm build
 pnpm test:demo
 ```
 
-The sync source defaults to the parent repository. Source refresh reapplies the demo restrictions and selected logo. Unexpected source changes fail with an error for review.
+Every build and dev startup refreshes the demo from the parent repository’s current Studio source. The sync source defaults to the parent repository. The deployed `/studio/build.json` identifies its package version and source fingerprint. Source refresh reapplies the demo restrictions and selected logo. Unexpected source changes fail with an error for review.

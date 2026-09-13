@@ -1,3 +1,4 @@
+import { FieldSelect } from "./components/field-select";
 import { useState } from "react";
 import {
   ArrowLeft,
@@ -95,27 +96,29 @@ export function Processors() {
             </label>
             <label>
               Starting schema
-              <select
+              <FieldSelect
                 value={starter}
-                onChange={(e) => {
-                  setStarter(e.target.value);
-                  const t = processorStarters.find(
-                    (t) => t.id === e.target.value,
-                  );
+                onValueChange={(value) => {
+                  setStarter(value);
+                  const t = processorStarters.find((t) => t.id === value);
                   if (!name && t && t.id !== "blank") setName(t.name);
                 }}
-              >
-                {s.newProcessorDraft && (
-                  <option value="current">
-                    Current playground configuration
-                  </option>
-                )}
-                {processorStarters.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.id === "blank" ? "Blank · fully custom" : t.name}
-                  </option>
-                ))}
-              </select>
+                aria-label="Starting schema"
+                options={[
+                  ...(s.newProcessorDraft
+                    ? [
+                        {
+                          value: "current",
+                          label: "Current playground configuration",
+                        },
+                      ]
+                    : []),
+                  ...processorStarters.map((t) => ({
+                    value: t.id,
+                    label: t.id === "blank" ? "Blank · fully custom" : t.name,
+                  })),
+                ]}
+              />
             </label>
             <div className="processor-starter-preview">
               <span>
