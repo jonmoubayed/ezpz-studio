@@ -1,26 +1,8 @@
 name: Static demo checks
 
 on:
-  push:
-    paths:
-      - 'demo-site/**'
-      - 'src/**'
-      - 'public/**'
-      - 'licenses/**'
-      - 'EXTEND-LICENSE.md'
-      - 'package.json'
-      - 'pyproject.toml'
-      - '.github/workflows/demo-site.yml'
-  pull_request:
-    paths:
-      - 'demo-site/**'
-      - 'src/**'
-      - 'public/**'
-      - 'licenses/**'
-      - 'EXTEND-LICENSE.md'
-      - 'package.json'
-      - 'pyproject.toml'
-      - '.github/workflows/demo-site.yml'
+  workflow_call:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -28,6 +10,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: demo-site
@@ -35,10 +18,25 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version-file: .nvmrc
       - uses: pnpm/action-setup@v4
         with:
           version: '11.17.0'
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+          cache-dependency-path: demo-site/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
+        env:
+          VITE_REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}
       - run: pnpm test:demo
+      - name: Validate Cloudflare configuration without publishing
+        run: pnpm check:deploy
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cloudflare-site-${{ github.sha }}
+          path: demo-site/dist/
+          if-no-files-found: error
+          retention-days: 7

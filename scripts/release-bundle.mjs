@@ -6,6 +6,7 @@ import { pipeline } from "node:stream/promises";
 import { createGzip } from "node:zlib";
 import { createHash } from "node:crypto";
 import path from "node:path";
+import { releaseCompose } from "./release-compose.mjs";
 const version = JSON.parse(await readFile("package.json", "utf8")).version;
 const image = process.env.EZPZ_TEST_IMAGE || `ezpz-studio:${version}`;
 async function command(cmd, args) {
@@ -44,21 +45,19 @@ await pipeline(
   createWriteStream(path.join(directory, "image.tar.gz")),
 );
 await rm(path.join(directory, "image.tar"));
-const compose = (await readFile("compose.yaml", "utf8"))
-  .replace("    build: .\n", "")
-  .replace("ezpz-studio:" + version, image);
+const compose = releaseCompose(await readFile("compose.yaml", "utf8"), image);
 await writeFile(path.join(directory, "compose.yaml"), compose);
 await copyFile(".env.docker.example", path.join(directory, ".env.example"));
 await copyFile("LICENSE", path.join(directory, "LICENSE"));
 await copyFile("docs/deployment.md", path.join(directory, "DEPLOYMENT.md"));
 await writeFile(
   path.join(directory, "start.sh"),
-  `#!/bin/sh\nset -eu\ncd "$(dirname "$0")"\ndocker load --input image.tar.gz\ndocker compose up -d --no-build\nprintf '\\nOpen http://127.0.0.1:5180 (or your EZPZ_PORT).\\n'\n`,
+  `#!/bin/sh\nset -eu\ncd "$(dirname "$0")"\ndocker load --input image.tar.gz\ndocker compose up -d --no-build --pull never\nprintf '\\nOpen http://127.0.0.1:5180 (or your EZPZ_PORT).\\n'\n`,
   { mode: 0o755 },
 );
 await writeFile(
   path.join(directory, "start.ps1"),
-  `$ErrorActionPreference = "Stop"\nSet-Location $PSScriptRoot\ndocker load --input image.tar.gz\nif ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }\ndocker compose up -d --no-build\nif ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }\nWrite-Host "Open http://127.0.0.1:5180 (or your EZPZ_PORT)."\n`,
+  `$ErrorActionPreference = "Stop"\nSet-Location $PSScriptRoot\ndocker load --input image.tar.gz\nif ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }\ndocker compose up -d --no-build --pull never\nif ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }\nWrite-Host "Open http://127.0.0.1:5180 (or your EZPZ_PORT)."\n`,
 );
 await writeFile(
   path.join(directory, "README.txt"),

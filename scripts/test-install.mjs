@@ -31,7 +31,15 @@ try {
   if (actual !== expected) throw new Error("Release checksum mismatch");
   await command("tar", ["-xzf", archive, "-C", directory]);
   installation = path.join(directory, basename);
+  const compose = JSON.parse(await command("docker", ["compose", "config", "--format", "json"], installation));
+  if (compose.services.studio.image !== image || compose.services.studio.build) {
+    throw new Error(`Bundle must use the shipped image ${image} without a source build; got ${compose.services.studio.image}`);
+  }
   await command("sh", ["start.sh"], installation);
+  const container = await command("docker", ["compose", "ps", "-q", "studio"], installation);
+  const runningImage = await command("docker", ["inspect", container, "--format", "{{.Image}}"]);
+  const expectedImage = await command("docker", ["image", "inspect", image, "--format", "{{.Id}}"]);
+  if (runningImage !== expectedImage) throw new Error("Installer started a different image than the bundle contains");
   const port = (await command("docker", ["compose", "port", "studio", "4173"], installation)).split(":").at(-1);
   const base = `http://127.0.0.1:${port}`;
   let ready = false;
@@ -47,7 +55,7 @@ try {
   if (!(await (await fetch(base)).text()).includes('<div id="root">')) throw new Error("Installed frontend missing");
   const documents = await (await fetch(base + "/v1/documents")).json();
   if (documents.documents.length !== 0) throw new Error("Fresh installer contains documents");
-  console.log(`PASS: ${architecture} archive checksum, extraction, start.sh, Compose startup, and empty workspace.`);
+  console.log(`PASS: ${architecture} archive checksum, shipped image identity, extraction, start.sh, Compose startup, and empty workspace.`);
 } finally {
   if (installation) await command("docker", ["compose", "down", "--volumes"], installation);
   await rm(directory, {recursive: true, force: true});

@@ -80,16 +80,16 @@ The [beta checks workflow](https://github.com/jonmoubayed/ezpz-studio/actions/wo
 
 Registry publishing is available through the **Publish container image** workflow. Once a version is published, use the [GHCR deployment instructions](docs/deployment.md#pull-a-published-image) to pull it without building from source.
 
-To develop without Docker, use **Node.js 22.12+** and **Python 3.12**:
+To develop from source without rebuilding a wheel, use **Node.js 24** (`nvm use`) and **Python 3.12**:
 
 ```bash
 python3.12 -m venv .venv
 .venv/bin/python -m pip install -r requirements.lock
 npm ci
-npm start
+.venv/bin/python scripts/dev.py
 ```
 
-The launcher starts this checkout's backend on port 4173 and the frontend on 5180, or reuses an already-running API. Optional launcher overrides are documented in [Configuration](docs/configuration.md).
+Open **http://127.0.0.1:5180/**. Frontend edits hot reload; Python and workspace config edits restart the API. Ctrl+C stops both services. By default, it uses the installed wheel's persistent workspace; pass `--root .` for this checkout's data/config. See [development and deployment](docs/development.md) for workspace choices, Windows commands, and Cloudflare setup. `npm start` remains available with its existing [launcher overrides](docs/configuration.md).
 
 The workspace starts without sample documents. No provider key is needed to open it. Select the deterministic adapter explicitly for development fixtures; configure an LLM for general extraction.
 
@@ -151,6 +151,10 @@ For backups, stop the backend and copy its database and blob directory together.
 The separate [`demo-site/`](demo-site/) project contains the minimal landing page and browser-only studio demo. Build and host its `dist/` directory without a backend or provider credentials. Sample extractions and evaluations are simulated; selected files stay in the browser. See its [setup and hosting instructions](demo-site/README.md).
 
 ## Development
+
+Use `.venv/bin/python scripts/dev.py` to run both services with automatic reloads.
+The [development guide](docs/development.md) also describes deployment to Cloudflare
+after successful default-branch checks; PRs never deploy.
 
 ```bash
 npm run dev       # Frontend with hot reload; connect a separately running backend

@@ -261,6 +261,7 @@ try {
     fullPage: true,
   });
   await nav("Hill climbing");
+  await page.getByRole("tab", { name: "Manual experiment", exact: true }).click();
   await expect(
     page.getByRole("combobox", { name: "Baseline run", exact: true }),
   ).toContainText("Browser baseline");
@@ -349,7 +350,8 @@ try {
   await expect(page.locator(".source-pane")).toContainText("invoice-0.pdf");
   await page.screenshot({ path: "test-results/live-pdf.png", fullPage: true });
   // Offline startup must expose retry, never silently substitute sample data.
-  await page.route("**/v1/ready", (route) => route.abort());
+  const readinessURL = /\/v1\/ready(?:\?.*)?$/;
+  await page.route(readinessURL, (route) => route.abort());
   await page.reload();
   await expect(
     page.getByRole("heading", { name: "Your local backend is unavailable" }),
@@ -357,7 +359,7 @@ try {
   await expect(
     page.getByRole("banner").getByText("API offline", { exact: true }),
   ).toBeVisible();
-  await page.unroute("**/v1/ready");
+  await page.unroute(readinessURL);
   await page.getByRole("button", { name: "Reconnect", exact: true }).click();
   await expect(
     page.getByText("Local API connected", { exact: true }),

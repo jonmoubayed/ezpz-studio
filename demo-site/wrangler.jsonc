@@ -1,4 +1,5 @@
 {
+  "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "ezpz-studio",
   "compatibility_date": "2026-09-03",
   "assets": {
