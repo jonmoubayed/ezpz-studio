@@ -8,6 +8,8 @@ A local-first workbench for building document extractors, comparing experiments,
 
 **Model-agnostic · Locally hostable · MIT licensed**
 
+**[Try the browser demo](https://ezpz-studio.com/studio/index.html#Overview) · [Download Studio beta (.whl)](https://github.com/jonmoubayed/ezpz-studio/releases/download/v0.1.0-beta.1/ezpz_evals-0.1.0b1%2Bgf0cd40b157cc-py3-none-any.whl) · [Installation](#install-studio)**
+
 [Quick start](#quick-start) · [How it works](#how-it-works) · [Configuration](docs/configuration.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 
 </div>
@@ -40,29 +42,29 @@ ezpz uses open-source Extend UI components for document viewing and schema editi
 
 ## Quick start
 
-### Install a Python wheel
+### Install Studio
 
-After merging into the default branch, **Build and verify Studio** builds a wheel
-containing the current frontend and backend. Download `ezpz-wheel-<commit>` from
-the successful Actions run, extract it, and use the `uvx --from ... ezpz studio`
-command in the run summary. The installed app requires neither Node.js nor Docker
-and keeps your workspace outside the package installation.
+[Download the verified Studio beta wheel](https://github.com/jonmoubayed/ezpz-studio/releases/download/v0.1.0-beta.1/ezpz_evals-0.1.0b1%2Bgf0cd40b157cc-py3-none-any.whl) or, with [uv](https://docs.astral.sh/uv/getting-started/installation/) installed, install and launch directly:
 
-See [wheel builds and installation](docs/python-wheel.md) for local builds,
-downloads, workspace paths, and verification.
+```bash
+uvx --from "https://github.com/jonmoubayed/ezpz-studio/releases/download/v0.1.0-beta.1/ezpz_evals-0.1.0b1%2Bgf0cd40b157cc-py3-none-any.whl" ezpz studio
+```
+
+No Docker, Node.js, source checkout, or GitHub sign-in is required. Keep the terminal
+open while using Studio; press Ctrl+C to stop. Run the same command to reopen it.
+Configure a model provider for real extraction.
+
+This download is **0.1.0 beta 1**, built from verified commit `f0cd40b157cc`.
+Newer source changes are not included. See [release notes and checksums](https://github.com/jonmoubayed/ezpz-studio/releases/tag/v0.1.0-beta.1).
+
+See [wheel builds and installation](docs/python-wheel.md) for source builds,
+workspace paths, and verification.
 
 ### Explore the demo
 
-From this repository, with **Node.js 22.12+** and npm installed:
-
-```bash
-npm ci
-npm run dev
-```
-
-Open [the demo playground](http://127.0.0.1:5180/?demo=1#Playground).
-
-Demo mode uses labeled sample documents and scores. It makes no model calls. Normal URLs start in live mode and show a connection screen when the backend is unavailable.
+[Open the browser demo](https://ezpz-studio.com/studio/index.html#Overview)—no installation, account, or API key required.
+The hosted demo uses illustrative sample documents and scores and makes no model
+calls. Install Studio above to extract and evaluate your own documents with a model.
 
 ### Run your own workspace
 
